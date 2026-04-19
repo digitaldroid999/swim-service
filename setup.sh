@@ -42,8 +42,11 @@ echo "[5/6] Creating .env file..."
 if [ ! -f ".env" ]; then
 cat > .env << 'ENVEOF'
 # FAA SWIM SCDS credentials — fill in after portal.swim.faa.gov approval
+# SMF session: set SWIM_URL (e.g. tcps://scds.swim.faa.gov:55443) or SWIM_HOST + SWIM_PORT
 SWIM_HOST=scds.swim.faa.gov
-SWIM_PORT=5671
+SWIM_PORT=55443
+SWIM_VPN=TFMS
+SWIM_URL=
 SWIM_USERNAME=
 SWIM_PASSWORD=
 SWIM_QUEUE=

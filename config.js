@@ -4,10 +4,13 @@ require('dotenv').config();
 
 module.exports = {
   // ── FAA SWIM TFMData credentials ─────────────────────────────────────────
-  // TFMData: scheduled times, status, track position
+  // TFMData: scheduled times, status, track position (Solace SMF via solclientjs).
+  // Session URL: set SWIM_URL (e.g. tcps://scds.swim.faa.gov:55443) or SWIM_HOST + SWIM_PORT.
   swim: {
+    url:      (process.env.SWIM_URL || '').trim(),
     host:     process.env.SWIM_HOST     || 'scds.swim.faa.gov',
-    port:     parseInt(process.env.SWIM_PORT || '5671'),   // AMQPS (TLS)
+    port:     parseInt(process.env.SWIM_PORT || '55443', 10), // SMF TLS (tcps) default
+    vpn:      process.env.SWIM_VPN       || 'TFMS',
     username: process.env.SWIM_USERNAME || '',
     password: process.env.SWIM_PASSWORD || '',
     queue:    process.env.SWIM_QUEUE    || '',
@@ -16,8 +19,9 @@ module.exports = {
   // ── FAA SWIM SFDPS credentials ────────────────────────────────────────────
   // SFDPS (FIXM): actual OOOI gate-out/wheels-off/wheels-on/gate-in times
   sfdps: {
+    url:      (process.env.SWIM_SFDPS_URL || '').trim(),
     host:     process.env.SWIM_SFDPS_HOST     || 'ems2.swim.faa.gov',
-    port:     parseInt(process.env.SWIM_SFDPS_PORT || '5671'),  // AMQP TLS
+    port:     parseInt(process.env.SWIM_SFDPS_PORT || '55443', 10),
     vpn:      process.env.SWIM_SFDPS_VPN      || 'FDPS',
     username: process.env.SWIM_SFDPS_USERNAME || '',
     password: process.env.SWIM_SFDPS_PASSWORD || '',

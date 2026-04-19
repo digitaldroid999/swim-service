@@ -1,7 +1,7 @@
 {
   "name": "crew-assist-swim",
   "version": "1.0.0",
-  "description": "FAA SWIM/SCDS AMQP consumer for Crew Assist flight status",
+  "description": "FAA SWIM/SCDS Solace SMF consumer for Crew Assist flight status",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -10,7 +10,7 @@
     "test:ci": "jest --ci --coverage"
   },
   "dependencies": {
-    "rhea": "^2.0.0",
+    "solclientjs": "^10.18.0",
     "xml2js": "^0.6.2",
     "express": "^4.18.2",
     "better-sqlite3": "^9.4.3",
