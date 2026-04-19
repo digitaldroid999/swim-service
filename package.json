@@ -1,0 +1,29 @@
+{
+  "name": "crew-assist-swim",
+  "version": "1.0.0",
+  "description": "FAA SWIM/SCDS AMQP consumer for Crew Assist flight status",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "jest",
+    "test:ci": "jest --ci --coverage"
+  },
+  "dependencies": {
+    "rhea": "^2.0.0",
+    "xml2js": "^0.6.2",
+    "express": "^4.18.2",
+    "better-sqlite3": "^9.4.3",
+    "web-push": "^3.6.7",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "setupFiles": ["./tests/setup.js"]
+  }
+}
