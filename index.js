@@ -30,6 +30,11 @@ cron.schedule('0 3 * * *', () => {
 const swim = config.swim;
 const swimUrl = swim.url || `tcps://${swim.host}:${swim.port}`;
 
+let swimReconnectDelay = 5000;
+let swimReconnectTimer = null;
+let swimHandle = null;
+
+
 if (!swim.username || !swim.password || !swim.queue) {
   console.warn('[swim] TFMData credentials not configured — running in API-only mode');
   console.warn('[swim] Set SWIM_USERNAME, SWIM_PASSWORD, SWIM_QUEUE in .env to enable live data');
@@ -46,10 +51,6 @@ if (!sfdps.username || !sfdps.password || !sfdps.queue) {
 } else {
   connectSfdps();
 }
-
-let swimReconnectDelay = 5000;
-let swimReconnectTimer = null;
-let swimHandle = null;
 
 function connectSwim() {
   clearTimeout(swimReconnectTimer);
