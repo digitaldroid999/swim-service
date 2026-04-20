@@ -45,6 +45,10 @@ if (!swim.username || !swim.password || !swim.queue) {
 const sfdps = config.sfdps;
 const sfdpsUrl = sfdps.url || `tcps://${sfdps.host}:${sfdps.port}`;
 
+let sfdpsReconnectDelay = 5000;
+let sfdpsReconnectTimer = null;
+let sfdpsHandle = null;
+
 if (!sfdps.username || !sfdps.password || !sfdps.queue) {
   console.warn('[sfdps] SFDPS credentials not configured — actual OOOI times unavailable');
   console.warn('[sfdps] Set SWIM_SFDPS_* vars in .env to enable actual gate/runway times');
@@ -95,10 +99,6 @@ function connectSwim() {
     },
   });
 }
-
-let sfdpsReconnectDelay = 5000;
-let sfdpsReconnectTimer = null;
-let sfdpsHandle = null;
 
 function connectSfdps() {
   clearTimeout(sfdpsReconnectTimer);
