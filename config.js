@@ -19,13 +19,13 @@ module.exports = {
   // ── FAA SWIM SFDPS credentials ────────────────────────────────────────────
   // SFDPS (FIXM): actual OOOI gate-out/wheels-off/wheels-on/gate-in times
   sfdps: {
-    url:      (process.env.SWIM_SFDPS_URL || '').trim(),
-    host:     process.env.SWIM_SFDPS_HOST     || 'ems2.swim.faa.gov',
-    port:     parseInt(process.env.SWIM_SFDPS_PORT || '55443', 10),
-    vpn:      process.env.SWIM_SFDPS_VPN      || 'FDPS',
-    username: process.env.SWIM_SFDPS_USERNAME || '',
-    password: process.env.SWIM_SFDPS_PASSWORD || '',
-    queue:    process.env.SWIM_SFDPS_QUEUE    || '',
+    url:      (process.env.SWIM_URL || '').trim(),
+    host:     process.env.SWIM_HOST     || 'ems2.swim.faa.gov',
+    port:     parseInt(process.env.SWIM_PORT || '55443', 10),
+    vpn:      process.env.SWIM_VPN      || 'FDPS',
+    username: process.env.SWIM_USERNAME || '',
+    password: process.env.SWIM_PASSWORD || '',
+    queue:    process.env.SWIM_QUEUE    || '',
   },
 
   // ── API server ────────────────────────────────────────────────────────────
