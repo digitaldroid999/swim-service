@@ -143,6 +143,7 @@ async function handleTfmXml(xmlStr) {
 }
 
 async function handleSfdpsXml(xmlStr) {
+  console.log(`[SFDPS] received message`);
   const events = sfdpsParser.parseSfdpsMessage(xmlStr);
   console.log(`[SFDPS] parsed ${events.length} events from SFDPS message`);
 
