@@ -4,6 +4,9 @@
 
 require('dotenv').config(); // before reading SWIM_* (run app from project root so `.env` is found)
 
+const fs = require('fs');
+const path = require('path');
+
 const cron = require('node-cron');
 const config = require('./config');
 const db = require('./db');
@@ -26,9 +29,26 @@ function isLogPreSaveEnabled() {
   return envFlag('SWIM_LOG_PRE_SAVE') || envFlag('SWIM_LOG_DB_ROWS');
 }
 
+function preSaveLogFilePath() {
+  const p = (process.env.SWIM_LOG_PRE_SAVE_FILE || '').trim();
+  return path.resolve(process.cwd(), p || 'log/swim-pre-save.log');
+}
+
+function appendPreSaveLogFile(text) {
+  const filePath = preSaveLogFilePath();
+  const dir = path.dirname(filePath);
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(filePath, text, 'utf8');
+  } catch (err) {
+    console.error('[swim] SWIM_LOG_PRE_SAVE file write failed:', err.message);
+  }
+}
+
 /**
  * Log one sample event (flight_events shape) and flight_watches for that flight/date.
  * Call once per handler invocation, not per event in a batch.
+ * Writes the same content to console and to SWIM_LOG_PRE_SAVE_FILE (default log/swim-pre-save.log).
  */
 function logBeforeSaveEvent(source, event) {
   if (!isLogPreSaveEnabled()) return;
@@ -36,21 +56,33 @@ function logBeforeSaveEvent(source, event) {
   if (ev.raw_xml != null && typeof ev.raw_xml === 'string' && ev.raw_xml.length > 800) {
     ev.raw_xml = `${ev.raw_xml.slice(0, 800)}… (${event.raw_xml.length} chars total)`;
   }
+  const watches =
+    event.flight && event.date ? db.getWatchesForFlight(event.flight, event.date) : null;
+
+  const ts = new Date().toISOString();
+  let block = `\n--- ${ts} [${source}] ---\n`;
+  block += `flight_events (before saveEvent)\n${JSON.stringify(ev, null, 2)}\n`;
+  if (watches != null) {
+    block +=
+      `flight_watches (existing rows for ${event.flight} ${event.date}, before saveEvent)\n` +
+      `${JSON.stringify(watches, null, 2)}\n`;
+  }
+
   console.log(`[${source}] flight_events (before saveEvent)\n${JSON.stringify(ev, null, 2)}`);
-  if (event.flight && event.date) {
-    const watches = db.getWatchesForFlight(event.flight, event.date);
+  if (watches != null) {
     console.log(
       `[${source}] flight_watches (existing rows for ${event.flight} ${event.date}, before saveEvent)\n` +
         JSON.stringify(watches, null, 2)
     );
   }
+  appendPreSaveLogFile(block);
 }
 
 console.log('[swim] Crew Assist SWIM Service starting…');
 
 if (isLogPreSaveEnabled()) {
   console.log(
-    '[swim] SWIM_LOG_PRE_SAVE is on — you will see one sample flight_events + flight_watches log per TFM/SFDPS message when messages arrive (not on a timer).'
+    `[swim] SWIM_LOG_PRE_SAVE is on — logs append to ${preSaveLogFilePath()} (and console) when TFM/SFDPS messages arrive.`
   );
 }
 
