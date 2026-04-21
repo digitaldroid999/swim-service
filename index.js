@@ -13,6 +13,28 @@ const { brokerKind } = require('./lib/broker-url');
 const { connectAmqpQueue } = require('./lib/amqp-queue');
 const { connectSmfQueue } = require('./lib/smf-queue');
 
+const logPreSave =
+  process.env.SWIM_LOG_PRE_SAVE === 'true' || process.env.SWIM_LOG_DB_ROWS === 'true';
+
+/**
+ * Log parsed event payload (flight_events shape) and existing flight_watches for this flight/date.
+ */
+function logBeforeSaveEvent(source, event) {
+  if (!logPreSave) return;
+  const ev = { ...event };
+  if (ev.raw_xml != null && typeof ev.raw_xml === 'string' && ev.raw_xml.length > 800) {
+    ev.raw_xml = `${ev.raw_xml.slice(0, 800)}… (${event.raw_xml.length} chars total)`;
+  }
+  console.log(`[${source}] flight_events (before saveEvent)\n${JSON.stringify(ev, null, 2)}`);
+  if (event.flight && event.date) {
+    const watches = db.getWatchesForFlight(event.flight, event.date);
+    console.log(
+      `[${source}] flight_watches (existing rows for ${event.flight} ${event.date}, before saveEvent)\n` +
+        JSON.stringify(watches, null, 2)
+    );
+  }
+}
+
 console.log('[swim] Crew Assist SWIM Service starting…');
 
 initVapid();
@@ -59,6 +81,7 @@ async function handleTfmXml(xmlStr) {
   for (const event of events) {
     const prev = db.getEvent(event.flight, event.date, event.dep_airport);
     const prevStatus = prev ? prev.status : null;
+    logBeforeSaveEvent('swim', event);
     db.saveEvent(event);
     if (event.status !== prevStatus) {
       notifyWatchers(event, prevStatus).catch((err) => console.warn('[swim] notify error:', err.message));
@@ -71,6 +94,7 @@ async function handleSfdpsXml(xmlStr) {
   for (const event of events) {
     const prev = db.getEvent(event.flight, event.date, event.dep_airport);
     const prevStatus = prev ? prev.status : null;
+    logBeforeSaveEvent('sfdps', event);
     db.saveEvent(event);
     if (event.status && event.status !== prevStatus) {
       notifyWatchers(event, prevStatus).catch((err) => console.warn('[sfdps] notify error:', err.message));
