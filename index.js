@@ -68,7 +68,7 @@ function logBeforeSaveEvent(source, event) {
       `${JSON.stringify(watches, null, 2)}\n`;
   }
 
-  console.log(`[${source}] flight_events (before saveEvent)\n${JSON.stringify(ev, null, 2)}`);
+  // console.log(`[${source}] flight_events (before saveEvent)\n${JSON.stringify(ev, null, 2)}`);
   if (watches != null) {
     console.log(
       `[${source}] flight_watches (existing rows for ${event.flight} ${event.date}, before saveEvent)\n` +
