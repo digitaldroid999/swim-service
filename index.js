@@ -1,164 +1,193 @@
 // Crew Assist SWIM Service — Main Entry Point
-// Connects to FAA SWIM SCDS via Solace SMF (solclientjs, tcps:// or wss://),
-// parses TFMData / SFDPS XML messages, stores flight events, and triggers push notifications.
+// SWIM: AMQP 1.0 (Solace) and/or Solace SMF — same routing as swim-node-consumer (URL scheme).
+// Parses TFMData / SFDPS XML, stores events, triggers push notifications.
 
-const cron          = require('node-cron');
-const config        = require('./config');
-const db            = require('./db');
-const parser        = require('./parser');
-const sfdpsParser   = require('./sfdps-parser');
+const cron = require('node-cron');
+const config = require('./config');
+const db = require('./db');
+const parser = require('./parser');
+const sfdpsParser = require('./sfdps-parser');
 const { initVapid, notifyWatchers } = require('./notifications');
-const { startApi }  = require('./api');
-const { connectQueueConsumer } = require('./solace-smf');
-
-// ── Startup ───────────────────────────────────────────────────────────────────
+const { startApi } = require('./api');
+const { brokerKind } = require('./lib/broker-url');
+const { connectAmqpQueue } = require('./lib/amqp-queue');
+const { connectSmfQueue } = require('./lib/smf-queue');
 
 console.log('[swim] Crew Assist SWIM Service starting…');
 
 initVapid();
 startApi();
 
-// Prune old data daily at 3am
 cron.schedule('0 3 * * *', () => {
   db.pruneOldEvents();
   db.pruneOldWatches();
   console.log('[swim] daily prune complete');
 });
 
-// ── SMF (Solace) connections ────────────────────────────────────────────────────
-
 const swim = config.swim;
-const swimUrl = swim.url || `tcps://${swim.host}:${swim.port}`;
-
-let swimReconnectDelay = 5000;
-let swimReconnectTimer = null;
-let swimHandle = null;
-
-
 if (!swim.username || !swim.password || !swim.queue) {
   console.warn('[swim] TFMData credentials not configured — running in API-only mode');
   console.warn('[swim] Set SWIM_USERNAME, SWIM_PASSWORD, SWIM_QUEUE in .env to enable live data');
 } else {
-  connectSwim();
+  const kind = brokerKind(swim.url, true);
+  if (kind === 'unknown' && swim.url) {
+    console.error('[swim] unsupported SWIM_URL scheme — use amqp(s):// or tcp(s):// / ws(s)://');
+  } else if (kind === 'smf' && !swim.vpn) {
+    console.error('[swim] SMF requires SWIM_VPN (message VPN), matching Solace / swim-node-consumer');
+  } else {
+    connectSwim();
+  }
 }
 
 const sfdps = config.sfdps;
-const sfdpsUrl = sfdps.url || `tcps://${sfdps.host}:${sfdps.port}`;
-
-let sfdpsReconnectDelay = 5000;
-let sfdpsReconnectTimer = null;
-let sfdpsHandle = null;
-
 if (!sfdps.username || !sfdps.password || !sfdps.queue) {
   console.warn('[sfdps] SFDPS credentials not configured — actual OOOI times unavailable');
   console.warn('[sfdps] Set SWIM_SFDPS_* vars in .env to enable actual gate/runway times');
 } else {
-  connectSfdps();
+  const sKind = brokerKind(sfdps.url, true);
+  if (sKind === 'unknown' && sfdps.url) {
+    console.error('[sfdps] unsupported SWIM_SFDPS_URL scheme');
+  } else if (sKind === 'smf' && !sfdps.vpn) {
+    console.error('[sfdps] SMF requires SWIM_SFDPS_VPN');
+  } else {
+    connectSfdps();
+  }
+}
+
+async function handleTfmXml(xmlStr) {
+  const events = await parser.parseTfmMessage(xmlStr);
+  for (const event of events) {
+    const prev = db.getEvent(event.flight, event.date, event.dep_airport);
+    const prevStatus = prev ? prev.status : null;
+    db.saveEvent(event);
+    if (event.status !== prevStatus) {
+      notifyWatchers(event, prevStatus).catch((err) => console.warn('[swim] notify error:', err.message));
+    }
+  }
+}
+
+async function handleSfdpsXml(xmlStr) {
+  const events = sfdpsParser.parseSfdpsMessage(xmlStr);
+  for (const event of events) {
+    const prev = db.getEvent(event.flight, event.date, event.dep_airport);
+    const prevStatus = prev ? prev.status : null;
+    db.saveEvent(event);
+    if (event.status && event.status !== prevStatus) {
+      notifyWatchers(event, prevStatus).catch((err) => console.warn('[sfdps] notify error:', err.message));
+    }
+  }
 }
 
 function connectSwim() {
-  clearTimeout(swimReconnectTimer);
-  swimReconnectTimer = null;
+  const c = config.swim;
+  const kind = brokerKind(c.url, true);
 
-  console.log(`[swim] connecting SMF ${swimUrl} vpn=${swim.vpn} as ${swim.username}`);
+  if (kind === 'smf') {
+    connectSmfQueue({
+      providerUrl: c.url,
+      vpn: c.vpn,
+      username: c.username,
+      password: c.password,
+      queue: c.queue,
+      clientName: c.clientName,
+      reconnectRetries: c.reconnectRetries,
+      sslValidateCertificate: c.sslValidateCertificate,
+      sslTrustStores: c.sslTrustStores,
+      logPrefix: '[swim]',
+      onMessage: handleTfmXml,
+    });
+    return;
+  }
 
-  swimHandle = connectQueueConsumer({
-    url: swimUrl,
-    vpnName: swim.vpn,
-    userName: swim.username,
-    password: swim.password,
-    queueName: swim.queue,
-    clientName: 'ca-swim-tfmdata',
-    logPrefix: 'swim',
-    onSessionUp: () => {
-      swimReconnectDelay = 5000;
-    },
-    onXml: async (xmlStr) => {
-      const events = await parser.parseTfmMessage(xmlStr);
+  if (kind === 'amqp-url') {
+    connectAmqpQueue({
+      mode: 'url',
+      providerUrl: c.url,
+      host: c.host,
+      port: c.port,
+      username: c.username,
+      password: c.password,
+      queue: c.queue,
+      virtualHost: c.vpn,
+      connectionId: 'ca-swim-tfmdata',
+      logPrefix: '[swim]',
+      onMessage: handleTfmXml,
+    });
+    return;
+  }
 
-      for (const event of events) {
-        const prev = db.getEvent(event.flight, event.date, event.dep_airport);
-        const prevStatus = prev ? prev.status : null;
-
-        db.saveEvent(event);
-
-        if (event.status !== prevStatus) {
-          notifyWatchers(event, prevStatus).catch(err =>
-            console.warn('[swim] notify error:', err.message)
-          );
-        }
-      }
-    },
-    onDisconnect: () => {
-      swimHandle = null;
-      console.warn('[swim] connection closed — reconnecting in', swimReconnectDelay / 1000, 's');
-      swimReconnectTimer = setTimeout(() => {
-        swimReconnectDelay = Math.min(swimReconnectDelay * 2, 300000);
-        connectSwim();
-      }, swimReconnectDelay);
-    },
+  connectAmqpQueue({
+    mode: 'legacy',
+    host: c.host,
+    port: c.port,
+    username: c.username,
+    password: c.password,
+    queue: c.queue,
+    virtualHost: c.vpn,
+    connectionId: 'ca-swim-tfmdata',
+    logPrefix: '[swim]',
+    onMessage: handleTfmXml,
   });
 }
 
 function connectSfdps() {
-  clearTimeout(sfdpsReconnectTimer);
-  sfdpsReconnectTimer = null;
+  const c = config.sfdps;
+  const kind = brokerKind(c.url, true);
 
-  console.log(`[sfdps] connecting SMF ${sfdpsUrl} vpn=${sfdps.vpn} as ${sfdps.username}`);
+  if (kind === 'smf') {
+    connectSmfQueue({
+      providerUrl: c.url,
+      vpn: c.vpn,
+      username: c.username,
+      password: c.password,
+      queue: c.queue,
+      clientName: c.clientName,
+      reconnectRetries: c.reconnectRetries,
+      sslValidateCertificate: c.sslValidateCertificate,
+      sslTrustStores: c.sslTrustStores,
+      logPrefix: '[sfdps]',
+      onMessage: handleSfdpsXml,
+    });
+    return;
+  }
 
-  sfdpsHandle = connectQueueConsumer({
-    url: sfdpsUrl,
-    vpnName: sfdps.vpn,
-    userName: sfdps.username,
-    password: sfdps.password,
-    queueName: sfdps.queue,
-    clientName: 'ca-swim-sfdps',
-    logPrefix: 'sfdps',
-    onSessionUp: () => {
-      sfdpsReconnectDelay = 5000;
-    },
-    onXml: async (xmlStr) => {
-      const events = sfdpsParser.parseSfdpsMessage(xmlStr);
+  if (kind === 'amqp-url') {
+    connectAmqpQueue({
+      mode: 'url',
+      providerUrl: c.url,
+      host: c.host,
+      port: c.port,
+      username: c.username,
+      password: c.password,
+      queue: c.queue,
+      virtualHost: c.vpn,
+      connectionId: 'ca-swim-sfdps',
+      logPrefix: '[sfdps]',
+      onMessage: handleSfdpsXml,
+    });
+    return;
+  }
 
-      for (const event of events) {
-        const prev = db.getEvent(event.flight, event.date, event.dep_airport);
-        const prevStatus = prev ? prev.status : null;
-        db.saveEvent(event);
-        if (event.status && event.status !== prevStatus) {
-          notifyWatchers(event, prevStatus).catch(err =>
-            console.warn('[sfdps] notify error:', err.message)
-          );
-        }
-      }
-    },
-    onDisconnect: () => {
-      sfdpsHandle = null;
-      console.warn('[sfdps] connection closed — reconnecting in', sfdpsReconnectDelay / 1000, 's');
-      sfdpsReconnectTimer = setTimeout(() => {
-        sfdpsReconnectDelay = Math.min(sfdpsReconnectDelay * 2, 300000);
-        connectSfdps();
-      }, sfdpsReconnectDelay);
-    },
+  connectAmqpQueue({
+    mode: 'legacy',
+    host: c.host,
+    port: c.port,
+    username: c.username,
+    password: c.password,
+    queue: c.queue,
+    virtualHost: c.vpn,
+    connectionId: 'ca-swim-sfdps',
+    logPrefix: '[sfdps]',
+    onMessage: handleSfdpsXml,
   });
-}
-
-// ── Graceful shutdown ─────────────────────────────────────────────────────────
-
-function shutdown() {
-  clearTimeout(swimReconnectTimer);
-  clearTimeout(sfdpsReconnectTimer);
-  if (swimHandle) swimHandle.disconnect();
-  if (sfdpsHandle) sfdpsHandle.disconnect();
 }
 
 process.on('SIGTERM', () => {
   console.log('[swim] SIGTERM received — shutting down');
-  shutdown();
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
   console.log('[swim] SIGINT received — shutting down');
-  shutdown();
   process.exit(0);
 });

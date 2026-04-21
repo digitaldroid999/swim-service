@@ -1,54 +1,87 @@
-// Crew Assist SWIM Service — Configuration
-// All secrets loaded from environment variables (set in .env on the server)
+'use strict';
+
+// All secrets from environment variables (set in .env on the server)
 require('dotenv').config();
 
+function parseTrustStores(raw) {
+  if (!raw || typeof raw !== 'string') return [];
+  return raw
+    .split(/[,;]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function numOr(v, def) {
+  if (v === undefined || v === '') return def;
+  const n = parseInt(String(v), 10);
+  return Number.isFinite(n) ? n : def;
+}
+
+function swimBlockFromEnv(prefix, defaults) {
+  const urlKey = `${prefix}_URL`;
+  const url = (process.env[urlKey] || '').trim();
+
+  const sslTrustRaw = process.env[`${prefix}_SSL_TRUST_STORES`];
+  const sslTrustStores =
+    sslTrustRaw != null && String(sslTrustRaw).length
+      ? parseTrustStores(sslTrustRaw)
+      : [];
+
+  const sslVal = process.env[`${prefix}_SSL_VALIDATE_CERTIFICATE`];
+  const sslValidateCertificate =
+    sslVal === undefined || sslVal === '' ? undefined : String(sslVal).toLowerCase() === 'true';
+
+  const reconnectRaw = process.env[`${prefix}_RECONNECT_RETRIES`];
+  const reconnectRetries =
+    reconnectRaw === undefined || reconnectRaw === '' ? -1 : numOr(reconnectRaw, -1);
+
+  return {
+    url,
+    host: process.env[`${prefix}_HOST`] || defaults.host,
+    port: numOr(process.env[`${prefix}_PORT`], defaults.port),
+    username: process.env[`${prefix}_USERNAME`] || '',
+    password: process.env[`${prefix}_PASSWORD`] || '',
+    queue: process.env[`${prefix}_QUEUE`] || '',
+    vpn: process.env[`${prefix}_VPN`] || defaults.vpn,
+    clientName: (process.env[`${prefix}_CLIENT_NAME`] || defaults.clientName || '').trim(),
+    reconnectRetries,
+    sslValidateCertificate,
+    sslTrustStores: sslTrustStores.length ? sslTrustStores : undefined,
+  };
+}
+
 module.exports = {
-  // ── FAA SWIM TFMData credentials ─────────────────────────────────────────
-  // TFMData: scheduled times, status, track position (Solace SMF via solclientjs).
-  // Session URL: set SWIM_URL (e.g. tcps://scds.swim.faa.gov:55443) or SWIM_HOST + SWIM_PORT.
-  swim: {
-    url:      (process.env.SWIM_URL || '').trim(),
-    host:     process.env.SWIM_HOST     || 'scds.swim.faa.gov',
-    port:     parseInt(process.env.SWIM_PORT || '55443', 10), // SMF TLS (tcps) default
-    vpn:      process.env.SWIM_VPN       || 'TFMS',
-    username: process.env.SWIM_USERNAME || '',
-    password: process.env.SWIM_PASSWORD || '',
-    queue:    process.env.SWIM_QUEUE    || '',
-  },
+  swim: swimBlockFromEnv('SWIM', {
+    host: 'scds.swim.faa.gov',
+    port: 5671,
+    vpn: 'TFMS',
+    clientName: 'ca-swim-tfmdata',
+  }),
 
-  // ── FAA SWIM SFDPS credentials ────────────────────────────────────────────
-  // SFDPS (FIXM): actual OOOI gate-out/wheels-off/wheels-on/gate-in times
-  sfdps: {
-    url:      (process.env.SWIM_URL || '').trim(),
-    host:     process.env.SWIM_HOST     || 'ems2.swim.faa.gov',
-    port:     parseInt(process.env.SWIM_PORT || '55443', 10),
-    vpn:      process.env.SWIM_VPN      || 'FDPS',
-    username: process.env.SWIM_USERNAME || '',
-    password: process.env.SWIM_PASSWORD || '',
-    queue:    process.env.SWIM_QUEUE    || '',
-  },
+  sfdps: swimBlockFromEnv('SWIM_SFDPS', {
+    host: 'ems2.swim.faa.gov',
+    port: 5671,
+    vpn: 'FDPS',
+    clientName: 'ca-swim-sfdps',
+  }),
 
-  // ── API server ────────────────────────────────────────────────────────────
   api: {
-    port:   parseInt(process.env.API_PORT || '3000'),
-    secret: process.env.API_SECRET || 'change-this-secret',   // Netlify functions use this
+    port: parseInt(process.env.API_PORT || '3000', 10),
+    secret: process.env.API_SECRET || 'change-this-secret',
   },
 
-  // ── VAPID push notifications ──────────────────────────────────────────────
   vapid: {
-    publicKey:  process.env.VAPID_PUBLIC_KEY  || '',
+    publicKey: process.env.VAPID_PUBLIC_KEY || '',
     privateKey: process.env.VAPID_PRIVATE_KEY || '',
-    subject:    process.env.VAPID_SUBJECT     || 'mailto:support@crewassistapp.com',
+    subject: process.env.VAPID_SUBJECT || 'mailto:support@crewassistapp.com',
   },
 
-  // ── Database ──────────────────────────────────────────────────────────────
   db: {
     path: process.env.DB_PATH || './data/swim.db',
   },
 
-  // ── Netlify blob store (to read push subscriptions saved by the app) ──────
   netlify: {
-    token:  process.env.NETLIFY_TOKEN  || '',
+    token: process.env.NETLIFY_TOKEN || '',
     siteId: process.env.NETLIFY_SITE_ID || '',
   },
 };
