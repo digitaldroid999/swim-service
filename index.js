@@ -128,7 +128,7 @@ if (!sfdps.username || !sfdps.password || !sfdps.queue) {
 async function handleTfmXml(xmlStr) {
   const events = await parser.parseTfmMessage(xmlStr);
   console.log(`[swim] parsed ${events.length} events from TFM message`);
-  
+
   if (events.length > 0) {
     logBeforeSaveEvent('swim', events[0]);
   }
@@ -144,6 +144,8 @@ async function handleTfmXml(xmlStr) {
 
 async function handleSfdpsXml(xmlStr) {
   const events = sfdpsParser.parseSfdpsMessage(xmlStr);
+  console.log(`[SFDPS] parsed ${events.length} events from SFDPS message`);
+
   if (events.length > 0) {
     logBeforeSaveEvent('sfdps', events[0]);
   }
