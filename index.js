@@ -158,6 +158,7 @@ async function handleSfdpsXml(xmlStr) {
 function connectSwim() {
   const c = config.swim;
   const kind = brokerKind(c.url, true);
+  console.log(`[swim] broker transport kind: ${kind}${c.url ? ` (SWIM_URL=${c.url})` : ' (legacy AMQP: host/port)'}`);
 
   if (kind === 'smf') {
     connectSmfQueue({
@@ -210,6 +211,7 @@ function connectSwim() {
 function connectSfdps() {
   const c = config.sfdps;
   const kind = brokerKind(c.url, true);
+  console.log(`[sfdps] broker transport kind: ${kind}${c.url ? ` (SWIM_SFDPS_URL=${c.url})` : ' (legacy AMQP: host/port)'}`);
 
   if (kind === 'smf') {
     connectSmfQueue({
