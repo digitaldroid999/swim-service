@@ -95,6 +95,65 @@ function getBlock(xml, localName) {
   return xml.slice(start, end + closeTag.length);
 }
 
+/** Keep original token if it parses as a date (FIXM allows slight format variants) */
+function normalizeIsoFragment(s) {
+  if (!s) return null;
+  const t = s.trim();
+  if (!t) return null;
+  const ms = Date.parse(t);
+  if (Number.isNaN(ms)) return null;
+  return t;
+}
+
+/**
+ * FIXM often nests timestamps, e.g.
+ *   <actualOffBlockTime><completeDateTime>2026-04-05T14:00:00Z</completeDateTime></actualOffBlockTime>
+ * or uses attributes: dateTime="..." / time="..."
+ * Direct text body is also supported (legacy tests).
+ */
+function getIsoTime(xml, localName) {
+  const direct = getEl(xml, localName);
+  const n = normalizeIsoFragment(direct || '');
+  if (n && !Number.isNaN(Date.parse(n))) return n;
+
+  const block = getBlock(xml, localName);
+  if (block) {
+    const inner =
+      getEl(block, 'completeDateTime')
+      || getEl(block, 'dateTime')
+      || getEl(block, 'timestamp')
+      || getEl(block, 'timeValue')
+      || getEl(block, 'characterString');
+    const n2 = normalizeIsoFragment(inner || '');
+    if (n2 && !Number.isNaN(Date.parse(n2))) return n2;
+
+    const attrT =
+      getAttr(block, localName, 'dateTime')
+      || getAttr(block, localName, 'time')
+      || getAttr(block, 'AbstractTime', 'dateTime');
+    const n3 = normalizeIsoFragment(attrT || '');
+    if (n3 && !Number.isNaN(Date.parse(n3))) return n3;
+  }
+
+  const onOpen =
+    getAttr(xml, localName, 'dateTime')
+    || getAttr(xml, localName, 'time')
+    || getAttr(xml, localName, 'timeValue');
+  const n4 = normalizeIsoFragment(onOpen || '');
+  if (n4 && !Number.isNaN(Date.parse(n4))) return n4;
+
+  const selfClose = new RegExp(
+    `<(?:[^>\\s:]*:)?${localName}[^>]*?(?:dateTime|time|timeValue)="([^"]+)"[^>]*/\\s*>`,
+    'i'
+  );
+  const m = xml.match(selfClose);
+  if (m) {
+    const n5 = normalizeIsoFragment(m[1]);
+    if (n5 && !Number.isNaN(Date.parse(n5))) return n5;
+  }
+  return null;
+}
+
 // ── Date helper ───────────────────────────────────────────────────────────────
 // Derive YYYY-MM-DD from an ISO UTC string (used as the "date" key in the DB)
 function utcDate(isoStr) {
@@ -140,13 +199,30 @@ function parseSfdpsMessage(xmlStr) {
     if (event) results.push(event);
   }
 
+  if (
+    results.length === 0 &&
+    /^(1|true|yes|on)$/i.test(String(process.env.SWIM_LOG_SFDPS_ZERO || '').trim())
+  ) {
+    const hasId =
+      /aircraftIdentification/i.test(xmlStr) || /<\s*[^:>\s]+:aircraftIdentification\b/i.test(xmlStr);
+    const hasTime = /actualOffBlockTime|completeDateTime|estimatedOffBlockTime|dateTime="/i.test(
+      xmlStr
+    );
+    console.log(
+      `[sfdps] parse yielded 0 events — xmlLen=${xmlStr.length} aircraftId-ish=${hasId} time-ish=${hasTime}`
+    );
+  }
+
   return results;
 }
 
 function parseFlight(xml) {
   // ── Flight identification ──────────────────────────────────────────────────
   // FIXM: <fx:flightIdentification><fx:aircraftIdentification>UAL1340</...>
-  const icaoCallsign = getEl(xml, 'aircraftIdentification');
+  const icaoCallsign =
+    getEl(xml, 'aircraftIdentification')
+    || getEl(xml, 'aircraftId')
+    || getEl(xml, 'callsign');
   if (!icaoCallsign) return null; // can't identify without callsign
 
   const flight = icaoToIata(icaoCallsign);
@@ -172,61 +248,98 @@ function parseFlight(xml) {
     else if (icao && icao.length === 3) arrAirport = icao;
   }
 
-  // ── OOOI times ────────────────────────────────────────────────────────────
-  // OUT: gate pushback
-  const gateOut  = getEl(xml, 'actualOffBlockTime')
-                || getEl(xml, 'gateOutTime')
-                || getEl(xml, 'OUT');
+  // ── OOOI times (actual) ────────────────────────────────────────────────────
+  const gateOut =
+    getIsoTime(xml, 'actualOffBlockTime')
+    || getIsoTime(xml, 'gateOutTime')
+    || getIsoTime(xml, 'OUT');
 
-  // OFF: wheels up
-  const wheelsOff = getEl(xml, 'actualTakeoffTime')
-                 || getEl(xml, 'wheelsOffTime')
-                 || getEl(xml, 'OFF');
+  const wheelsOff =
+    getIsoTime(xml, 'actualTakeoffTime')
+    || getIsoTime(xml, 'wheelsOffTime')
+    || getIsoTime(xml, 'OFF');
 
-  // ON: touchdown
-  const wheelsOn  = getEl(xml, 'actualLandingTime')
-                 || getEl(xml, 'wheelsOnTime')
-                 || getEl(xml, 'ON');
+  const wheelsOn =
+    getIsoTime(xml, 'actualLandingTime')
+    || getIsoTime(xml, 'wheelsOnTime')
+    || getIsoTime(xml, 'ON');
 
-  // IN: at gate
-  const gateIn   = getEl(xml, 'actualInBlockTime')
-                || getEl(xml, 'gateInTime')
-                || getEl(xml, 'IN');
+  const gateIn =
+    getIsoTime(xml, 'actualInBlockTime')
+    || getIsoTime(xml, 'gateInTime')
+    || getIsoTime(xml, 'IN');
 
-  // Must have at least one OOOI time to be worth saving
-  if (!gateOut && !wheelsOff && !wheelsOn && !gateIn) {
-    // Log first few non-matching blocks so we can check format
+  // Estimated / filed times when no actuals yet (common on first SFDPS updates)
+  let gateOutE =
+    getIsoTime(xml, 'estimatedOffBlockTime')
+    || getIsoTime(xml, 'scheduledOffBlockTime')
+    || getIsoTime(xml, 'coordinatedOffBlockTime');
+  let wheelsOffE =
+    getIsoTime(xml, 'estimatedTakeoffTime')
+    || getIsoTime(xml, 'scheduledTakeOffTime')
+    || getIsoTime(xml, 'scheduledTakeoffTime');
+  let wheelsOnE =
+    getIsoTime(xml, 'estimatedLandingTime')
+    || getIsoTime(xml, 'scheduledLandingTime');
+  let gateInE =
+    getIsoTime(xml, 'estimatedInBlockTime')
+    || getIsoTime(xml, 'scheduledInBlockTime');
+
+  // Use actual when present, else estimated for each field stored in DB
+  const gateOutFinal = gateOut || gateOutE;
+  const wheelsOffFinal = wheelsOff || wheelsOffE;
+  const wheelsOnFinal = wheelsOn || wheelsOnE;
+  const gateInFinal = gateIn || gateInE;
+
+  // Must have at least one usable time (actual or estimated) to persist
+  if (!gateOutFinal && !wheelsOffFinal && !wheelsOnFinal && !gateInFinal) {
     if (_rawLogCount <= RAW_LOG_MAX) {
-      console.log('[sfdps] no OOOI times found in block, callsign:', icaoCallsign);
+      console.log('[sfdps] no actual/estimated OOOI times in block, callsign:', icaoCallsign);
     }
     return null;
   }
 
-  // ── Derive status ─────────────────────────────────────────────────────────
-  let status = null;
+  // ── Derive status (actual OOOI drives lifecycle; estimated-only → Scheduled) ──
+  let status = 'Scheduled';
   if (gateIn || wheelsOn) status = 'Arrived';
-  else if (wheelsOff)     status = 'Airborne';
-  else if (gateOut)       status = 'Departed';
+  else if (wheelsOff) status = 'Airborne';
+  else if (gateOut) status = 'Departed';
 
-  // ── Derive date key ───────────────────────────────────────────────────────
-  // Use UTC date of earliest OOOI time as the DB key
-  const oooi = [gateOut, wheelsOff, wheelsOn, gateIn].filter(Boolean);
-  const dateStr = utcDate(oooi[0]);
+  // ── Derive date key: earliest time among stored fields ─────────────────────
+  function earliestIsoString(vals) {
+    const parsed = vals
+      .filter(Boolean)
+      .map((v) => ({ v, t: Date.parse(v) }))
+      .filter((x) => !Number.isNaN(x.t));
+    if (!parsed.length) return null;
+    parsed.sort((a, b) => a.t - b.t);
+    return parsed[0].v;
+  }
+
+  const dateBasis = earliestIsoString([
+    gateOutFinal,
+    wheelsOffFinal,
+    wheelsOnFinal,
+    gateInFinal,
+  ]);
+  const dateStr = utcDate(dateBasis);
   if (!dateStr) return null;
 
-  console.log(`[sfdps] ${flight} ${depAirport||'???'}→${arrAirport||'???'} OUT:${gateOut||'-'} OFF:${wheelsOff||'-'} ON:${wheelsOn||'-'} IN:${gateIn||'-'}`);
+  console.log(
+    `[sfdps] ${flight} ${depAirport || '???'}→${arrAirport || '???'} OUT:${gateOutFinal || '-'} OFF:${wheelsOffFinal || '-'} ON:${wheelsOnFinal || '-'} IN:${gateInFinal || '-'}`
+  );
 
   return {
     flight,
-    date:        dateStr,
-    dep_airport: depAirport  || null,
-    arr_airport: arrAirport  || null,
+    date: dateStr,
+    dep_airport: depAirport || null,
+    arr_airport: arrAirport || null,
     status,
-    gate_out:    gateOut     || null,
-    wheels_off:  wheelsOff   || null,
-    wheels_on:   wheelsOn    || null,
-    gate_in:     gateIn      || null,
-    raw_xml:     xml.slice(0, 4000),  // store first 4k for debug
+    gate_out: gateOutFinal || null,
+    wheels_off: wheelsOffFinal || null,
+    wheels_on: wheelsOnFinal || null,
+    gate_in: gateInFinal || null,
+    raw_xml: xml.slice(0, 4000),
   };
 }
 

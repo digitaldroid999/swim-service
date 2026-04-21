@@ -65,6 +65,31 @@ const NO_OOOI_XML = `
 </fx:Flight>
 `;
 
+/** Nested completeDateTime (common in FIXM) */
+const NESTED_OOOI_XML = `
+<fx:Flight xmlns:fx="http://www.fixm.aero/flight/4.2">
+  <fx:flightIdentification>
+    <fx:aircraftIdentification>UAL777</fx:aircraftIdentification>
+  </fx:flightIdentification>
+  <fx:departure>
+    <fx:iataDesignator>ORD</fx:iataDesignator>
+    <fx:actualOffBlockTime><fx:completeDateTime>2026-04-05T18:00:00Z</fx:completeDateTime></fx:actualOffBlockTime>
+  </fx:departure>
+</fx:Flight>
+`;
+
+const ESTIMATED_ONLY_XML = `
+<fx:Flight xmlns:fx="http://www.fixm.aero/flight/4.2">
+  <fx:flightIdentification>
+    <fx:aircraftIdentification>JBU400</fx:aircraftIdentification>
+  </fx:flightIdentification>
+  <fx:departure>
+    <fx:iataDesignator>BOS</fx:iataDesignator>
+    <fx:estimatedOffBlockTime>2026-04-06T12:00:00Z</fx:estimatedOffBlockTime>
+  </fx:departure>
+</fx:Flight>
+`;
+
 describe('parseSfdpsMessage', () => {
   test('parses full OOOI flight and returns one event', () => {
     const events = parseSfdpsMessage(FULL_OOOI_XML);
@@ -125,5 +150,23 @@ describe('parseSfdpsMessage', () => {
   test('date is derived from earliest OOOI time', () => {
     const [event] = parseSfdpsMessage(FULL_OOOI_XML);
     expect(event.date).toBe('2026-04-05');
+  });
+
+  test('parses nested completeDateTime under actualOffBlockTime', () => {
+    const events = parseSfdpsMessage(NESTED_OOOI_XML);
+    expect(events).toHaveLength(1);
+    expect(events[0].flight).toBe('UA777');
+    expect(events[0].gate_out).toBe('2026-04-05T18:00:00Z');
+    expect(events[0].status).toBe('Departed');
+    expect(events[0].dep_airport).toBe('ORD');
+  });
+
+  test('parses estimated-only flight and sets status Scheduled', () => {
+    const events = parseSfdpsMessage(ESTIMATED_ONLY_XML);
+    expect(events).toHaveLength(1);
+    expect(events[0].flight).toBe('B6400');
+    expect(events[0].gate_out).toBe('2026-04-06T12:00:00Z');
+    expect(events[0].status).toBe('Scheduled');
+    expect(events[0].date).toBe('2026-04-06');
   });
 });
