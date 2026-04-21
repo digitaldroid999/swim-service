@@ -90,6 +90,24 @@ const ESTIMATED_ONLY_XML = `
 </fx:Flight>
 `;
 
+/** FAA NAS MessageCollection / NasFlightType — attributes, lowercase <flight> */
+const NAS_SURVEILLANCE_XML = `
+<ns5:MessageCollection xmlns:ns5="http://www.faa.aero/nas/3.0">
+  <message xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="ns5:FlightMessageType">
+    <flight xsi:type="ns5:NasFlightType" centre="ZBW" source="TH" system="SLC" timestamp="2026-04-21T20:01:27.912Z">
+      <arrival xsi:type="ns5:NasArrivalType" arrivalPoint="CYYZ"/>
+      <departure xsi:type="ns5:NasDepartureType" departurePoint="CYHZ"/>
+      <enRoute xsi:type="ns5:NasEnRouteType">
+        <position xsi:type="ns5:NasAircraftPositionType" positionTime="2026-04-21T20:01:26Z" reportSource="SURVEILLANCE">
+          <altitude uom="FEET">36000.0</altitude>
+        </position>
+      </enRoute>
+      <flightIdentification xsi:type="ns5:NasFlightIdentificationType" aircraftIdentification="ACA615"/>
+    </flight>
+  </message>
+</ns5:MessageCollection>
+`;
+
 describe('parseSfdpsMessage', () => {
   test('parses full OOOI flight and returns one event', () => {
     const events = parseSfdpsMessage(FULL_OOOI_XML);
@@ -168,5 +186,17 @@ describe('parseSfdpsMessage', () => {
     expect(events[0].gate_out).toBe('2026-04-06T12:00:00Z');
     expect(events[0].status).toBe('Scheduled');
     expect(events[0].date).toBe('2026-04-06');
+  });
+
+  test('parses NAS MessageCollection: attribute callsign, departurePoint/arrivalPoint, surveillance time', () => {
+    const events = parseSfdpsMessage(NAS_SURVEILLANCE_XML);
+    expect(events).toHaveLength(1);
+    const e = events[0];
+    expect(e.flight).toBe('AC615');
+    expect(e.dep_airport).toBe('YHZ');
+    expect(e.arr_airport).toBe('YYZ');
+    expect(e.status).toBe('Airborne');
+    expect(e.wheels_off).toBe('2026-04-21T20:01:26Z');
+    expect(e.date).toBe('2026-04-21');
   });
 });

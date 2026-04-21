@@ -1,7 +1,8 @@
 // Crew Assist SWIM Service — SFDPS FIXM Parser
 //
-// FAA SFDPS provides FIXM 4.2 + NAS-extension XML messages with actual
-// OOOI (Out/Off/On/In) gate and runway times for NAS flights.
+// FAA SFDPS may deliver FIXM 4.2 (fx:Flight), NAS MessageCollection (FIXM 3.x),
+// or FAA NAS flight updates (lowercase <flight>, attributes on flightIdentification,
+// departurePoint / arrivalPoint on departure/arrival elements).
 //
 // Key elements we extract (namespace-agnostic regex):
 //   aircraftIdentification  → ICAO callsign e.g. "UAL1340"
@@ -41,6 +42,16 @@ const AIRLINE = {
   QFA:'QF', ANZ:'NZ', VAU:'VA',
 };
 
+/** Map ICAO aerodrome (CYHZ, KJFK, CYYZ) toward 3-letter codes used in the app DB */
+function normalizeAerodromeCode(raw) {
+  if (!raw) return null;
+  const c = raw.trim().toUpperCase();
+  if (c.length === 3) return c;
+  // US (Kxxx) and Canada (Cxxx) → drop leading letter per common FAA NAS practice
+  if (c.length === 4 && (c[0] === 'K' || c[0] === 'C')) return c.slice(1);
+  return c;
+}
+
 // Convert ICAO callsign → IATA  e.g. "UAL1340" → "UA1340"
 function icaoToIata(callsign) {
   if (!callsign) return null;
@@ -73,9 +84,19 @@ function getEl(xml, localName) {
   return m ? m[1].trim() : null;
 }
 
-// Get attribute value from first matching element
+// Get attribute value from first matching element (legacy: attr after optional single attr group)
 function getAttr(xml, localName, attrName) {
   const re = new RegExp(`<(?:[^>\\s:]*:)?${localName}(?:\\s[^>]*)?\\s${attrName}="([^"]*)"`, 'i');
+  const m = xml.match(re);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * Attribute on opening tag when attrs may appear in any order (NAS / XSD).
+ * e.g. <flightIdentification ... aircraftIdentification="ACA615"/>
+ */
+function getOpenTagAttr(xml, localName, attrName) {
+  const re = new RegExp(`<(?:[^>\\s:]*:)?${localName}\\b[^>]*?\\b${attrName}="([^"]*)"`, 'i');
   const m = xml.match(re);
   return m ? m[1].trim() : null;
 }
@@ -163,11 +184,50 @@ function utcDate(isoStr) {
   } catch { return null; }
 }
 
+/** FIXM element text or NAS attribute on flightIdentification / standalone attr */
+function getAircraftCallsign(xml) {
+  const direct =
+    getEl(xml, 'aircraftIdentification')
+    || getEl(xml, 'aircraftId')
+    || getEl(xml, 'callsign');
+  if (direct) return direct;
+
+  const fromFi =
+    getOpenTagAttr(xml, 'flightIdentification', 'aircraftIdentification')
+    || getOpenTagAttr(xml, 'NasFlightIdentificationType', 'aircraftIdentification');
+  if (fromFi) return fromFi;
+
+  const m = xml.match(/\baircraftIdentification\s*=\s*"([^"]+)"/i);
+  return m ? m[1].trim() : null;
+}
+
+/** FAA NAS messages often omit OOOI but include flight@timestamp or position@positionTime */
+function getNasFallbackTime(xml) {
+  const candidates = [];
+  const ts = getOpenTagAttr(xml, 'flight', 'timestamp');
+  const t1 = normalizeIsoFragment(ts || '');
+  if (t1 && !Number.isNaN(Date.parse(t1))) candidates.push(t1);
+
+  const pt =
+    getOpenTagAttr(xml, 'position', 'positionTime')
+    || getOpenTagAttr(xml, 'position', 'targetPositionTime');
+  const t2 = normalizeIsoFragment(pt || '');
+  if (t2 && !Number.isNaN(Date.parse(t2))) candidates.push(t2);
+
+  if (!candidates.length) return null;
+  candidates.sort((x, y) => Date.parse(x) - Date.parse(y));
+  return candidates[0];
+}
+
+function isAirborneNasFragment(xml) {
+  return /<[^>\s:]*:?enRoute\b/i.test(xml) && /\bpositionTime=/i.test(xml);
+}
+
+// Opening <flight> or <fx:Flight> but not <flightIdentification>
+const RE_FLIGHT_OPEN_TAG = /<(?:[^>\s/:.]*:)?flight(?:\s|\/>|>)/gi;
+
 // ── Main parse function ───────────────────────────────────────────────────────
 function parseSfdpsMessage(xmlStr) {
-
-  console.log(`[SFDPS] parsing message : ${xmlStr}`);
-  
   // Log first few raw messages for format verification
   if (_rawLogCount < RAW_LOG_MAX) {
     _rawLogCount++;
@@ -176,12 +236,11 @@ function parseSfdpsMessage(xmlStr) {
 
   const results = [];
 
-  // SFDPS may wrap multiple flight records — split on <fx:Flight> or <nas:Flight>
-  // Try to find all Flight blocks; fall back to treating the whole message as one
-  const flightRe = /<[^>\s]*:?Flight[\s>]/gi;
+  // Split on each <flight> / <Flight> element (case-insensitive); excludes flightIdentification
+  RE_FLIGHT_OPEN_TAG.lastIndex = 0;
   let match;
   const positions = [];
-  while ((match = flightRe.exec(xmlStr)) !== null) {
+  while ((match = RE_FLIGHT_OPEN_TAG.exec(xmlStr)) !== null) {
     positions.push(match.index);
   }
 
@@ -221,23 +280,32 @@ function parseSfdpsMessage(xmlStr) {
 
 function parseFlight(xml) {
   // ── Flight identification ──────────────────────────────────────────────────
-  // FIXM: <fx:flightIdentification><fx:aircraftIdentification>UAL1340</...>
-  const icaoCallsign =
-    getEl(xml, 'aircraftIdentification')
-    || getEl(xml, 'aircraftId')
-    || getEl(xml, 'callsign');
+  const icaoCallsign = getAircraftCallsign(xml);
   if (!icaoCallsign) return null; // can't identify without callsign
 
   const flight = icaoToIata(icaoCallsign);
   if (!flight) return null;
 
   // ── Airport codes ──────────────────────────────────────────────────────────
-  // Look for iataDesignator inside departure/arrival blocks
   const depBlock = getBlock(xml, 'departure');
   const arrBlock = getBlock(xml, 'arrival');
 
   let depAirport = depBlock ? getEl(depBlock, 'iataDesignator') : null;
   let arrAirport = arrBlock ? getEl(arrBlock, 'iataDesignator') : null;
+
+  // NAS FIXM 3.x: departurePoint / arrivalPoint attributes (ICAO CYHZ, CYYZ)
+  if (!depAirport) {
+    const pt =
+      (depBlock && getOpenTagAttr(depBlock, 'departure', 'departurePoint'))
+      || getOpenTagAttr(xml, 'departure', 'departurePoint');
+    if (pt) depAirport = normalizeAerodromeCode(pt);
+  }
+  if (!arrAirport) {
+    const ap =
+      (arrBlock && getOpenTagAttr(arrBlock, 'arrival', 'arrivalPoint'))
+      || getOpenTagAttr(xml, 'arrival', 'arrivalPoint');
+    if (ap) arrAirport = normalizeAerodromeCode(ap);
+  }
 
   // Also try icaoDesignator and strip K prefix for US airports
   if (!depAirport && depBlock) {
@@ -289,12 +357,23 @@ function parseFlight(xml) {
     || getIsoTime(xml, 'scheduledInBlockTime');
 
   // Use actual when present, else estimated for each field stored in DB
-  const gateOutFinal = gateOut || gateOutE;
-  const wheelsOffFinal = wheelsOff || wheelsOffE;
+  let gateOutFinal = gateOut || gateOutE;
+  let wheelsOffFinal = wheelsOff || wheelsOffE;
   const wheelsOnFinal = wheelsOn || wheelsOnE;
   const gateInFinal = gateIn || gateInE;
 
-  // Must have at least one usable time (actual or estimated) to persist
+  /** When NAS sends surveillance/track updates without OOOI, use flight timestamp or position time */
+  let nasAirborneHint = false;
+  if (!gateOutFinal && !wheelsOffFinal && !wheelsOnFinal && !gateInFinal) {
+    const nasT = getNasFallbackTime(xml);
+    if (nasT) {
+      nasAirborneHint = isAirborneNasFragment(xml);
+      if (nasAirborneHint) wheelsOffFinal = nasT;
+      else gateOutFinal = nasT;
+    }
+  }
+
+  // Must have at least one usable time (OOOI, estimate, or NAS fallback) to persist
   if (!gateOutFinal && !wheelsOffFinal && !wheelsOnFinal && !gateInFinal) {
     if (_rawLogCount <= RAW_LOG_MAX) {
       console.log('[sfdps] no actual/estimated OOOI times in block, callsign:', icaoCallsign);
@@ -307,6 +386,7 @@ function parseFlight(xml) {
   if (gateIn || wheelsOn) status = 'Arrived';
   else if (wheelsOff) status = 'Airborne';
   else if (gateOut) status = 'Departed';
+  else if (nasAirborneHint && wheelsOffFinal) status = 'Airborne';
 
   // ── Derive date key: earliest time among stored fields ─────────────────────
   function earliestIsoString(vals) {
