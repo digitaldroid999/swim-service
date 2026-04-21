@@ -17,7 +17,8 @@ const logPreSave =
   process.env.SWIM_LOG_PRE_SAVE === 'true' || process.env.SWIM_LOG_DB_ROWS === 'true';
 
 /**
- * Log parsed event payload (flight_events shape) and existing flight_watches for this flight/date.
+ * Log one sample event (flight_events shape) and flight_watches for that flight/date.
+ * Call once per handler invocation, not per event in a batch.
  */
 function logBeforeSaveEvent(source, event) {
   if (!logPreSave) return;
@@ -78,10 +79,12 @@ if (!sfdps.username || !sfdps.password || !sfdps.queue) {
 
 async function handleTfmXml(xmlStr) {
   const events = await parser.parseTfmMessage(xmlStr);
+  if (events.length > 0) {
+    logBeforeSaveEvent('swim', events[0]);
+  }
   for (const event of events) {
     const prev = db.getEvent(event.flight, event.date, event.dep_airport);
     const prevStatus = prev ? prev.status : null;
-    logBeforeSaveEvent('swim', event);
     db.saveEvent(event);
     if (event.status !== prevStatus) {
       notifyWatchers(event, prevStatus).catch((err) => console.warn('[swim] notify error:', err.message));
@@ -91,10 +94,12 @@ async function handleTfmXml(xmlStr) {
 
 async function handleSfdpsXml(xmlStr) {
   const events = sfdpsParser.parseSfdpsMessage(xmlStr);
+  if (events.length > 0) {
+    logBeforeSaveEvent('sfdps', events[0]);
+  }
   for (const event of events) {
     const prev = db.getEvent(event.flight, event.date, event.dep_airport);
     const prevStatus = prev ? prev.status : null;
-    logBeforeSaveEvent('sfdps', event);
     db.saveEvent(event);
     if (event.status && event.status !== prevStatus) {
       notifyWatchers(event, prevStatus).catch((err) => console.warn('[sfdps] notify error:', err.message));
