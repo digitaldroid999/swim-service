@@ -43,6 +43,26 @@ const GA_TAIL_XML = `
 </fltdOutput>
 `;
 
+const FLIGHT_MODIFY_XML = `
+<fltdOutput>
+  <fdm:fltdMessage acid="QXE2077" airline="QXE" arrArpt="KSEA" depArpt="KBOI"
+    fdTrigger="FD_FLIGHT_MODIFY_MSG" flightRef="144749879" major="ASA"
+    msgType="FlightModify" sourceTimeStamp="2026-04-21T18:15:01Z">
+    <fdm:ncsmFlightModify>
+      <nxcm:qualifiedAircraftId aircraftCategory="JET" userCategory="AIR TAXI">
+        <nxce:aircraftId>QXE2077</nxce:aircraftId>
+        <nxce:igtd>2026-04-21T22:15:00Z</nxce:igtd>
+        <nxce:departurePoint><nxce:airport>KBOI</nxce:airport></nxce:departurePoint>
+        <nxce:arrivalPoint><nxce:airport>KSEA</nxce:airport></nxce:arrivalPoint>
+      </nxcm:qualifiedAircraftId>
+      <nxcm:airlineData>
+        <nxcm:flightStatusAndSpec><nxcm:flightStatus>PLANNED</nxcm:flightStatus></nxcm:flightStatusAndSpec>
+      </nxcm:airlineData>
+    </fdm:ncsmFlightModify>
+  </fdm:fltdMessage>
+</fltdOutput>
+`;
+
 const MULTI_MSG_XML = `
 <fltdOutput>
   <fdm:fltdMessage acid="UAL440" depArpt="KEWR" arrArpt="KLAX"
@@ -117,5 +137,17 @@ describe('parseTfmMessage', () => {
     const flights = events.map(e => e.flight).sort();
     expect(flights).toContain('UA440');
     expect(flights).toContain('AA100');
+  });
+
+  test('FlightModify extracts TFM metadata and aircraft category', async () => {
+    const [e] = await parseTfmMessage(FLIGHT_MODIFY_XML);
+    expect(e.flight).toBe('QX2077');
+    expect(e.faa_flight_ref).toBe('144749879');
+    expect(e.tfm_msg_type).toBe('FlightModify');
+    expect(e.tfm_fd_trigger).toBe('FD_FLIGHT_MODIFY_MSG');
+    expect(e.ncsm_flight_status).toBe('PLANNED');
+    expect(e.aircraft_category).toBe('JET');
+    expect(e.airline_icao).toBe('QXE');
+    expect(e.aircraft_type).toBe('JET');
   });
 });

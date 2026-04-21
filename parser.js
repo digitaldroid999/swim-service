@@ -505,15 +505,20 @@ async function parseTfmMessage(xml) {
     // for an Apr 6 departure gets stored under Apr 5 and never matches a search.
     const date = igtd ? igtd.slice(0, 10) : (ts ? ts.slice(0, 10) : new Date().toISOString().slice(0, 10));
 
-    // ETA from trackInformation: <nxcm:eta etaType="ESTIMATED" timeValue="..."/>
+    // ETA from trackInformation or ncsm blocks: <nxcm:eta etaType="ESTIMATED" timeValue="..."/>
     const etaVal        = celemAttr(childXml, 'eta', 'timeValue');
     const scheduled_arr = parseTime(etaVal);
 
     // ── Aircraft info ────────────────────────────────────────────────────────
-    const acType = celem(childXml, 'flightAircraftSpecs')
-                || attr(tagAttrs, 'acType')
-                || attr(tagAttrs, 'equipment')
-                || null;
+    const aircraftCategory = celemAttr(childXml, 'qualifiedAircraftId', 'aircraftCategory')
+      || celemAttr(childXml, 'qualifiedAircraftId', 'userCategory')
+      || null;
+    const acType =
+      celem(childXml, 'flightAircraftSpecs')
+      || attr(tagAttrs, 'acType')
+      || attr(tagAttrs, 'equipment')
+      || aircraftCategory
+      || null;
 
     // ── Current position (trackInformation) ─────────────────────────────────
     const altitude = parseInt(celem(childXml, 'simpleAltitude') || '0') || null;
@@ -524,6 +529,21 @@ async function parseTfmMessage(xml) {
 
     // ── Unique flight identifier ─────────────────────────────────────────────
     const gufi = celem(childXml, 'gufi') || null;
+
+    // Registration / tail when present (TFM namespaces)
+    const tail_number =
+      celem(childXml, 'registration')
+      || celem(childXml, 'aircraftRegistration')
+      || null;
+
+    // FAA message metadata (fltdMessage attributes + ncsm child status)
+    const faa_flight_ref = attr(tagAttrs, 'flightRef') || null;
+    const tfm_msg_type = attr(tagAttrs, 'msgType') || null;
+    const tfm_fd_trigger = attr(tagAttrs, 'fdTrigger') || null;
+    const srcTsRaw = attr(tagAttrs, 'sourceTimeStamp') || attr(tagAttrs, 'sourceTimestamp') || '';
+    const tfm_source_timestamp = srcTsRaw ? (parseTime(srcTsRaw) || srcTsRaw) : null;
+    const airline_icao = attr(tagAttrs, 'airline') || acid.slice(0, 3) || null;
+    const ncsm_flight_status = (celem(childXml, 'flightStatus') || '').trim() || null;
 
     events.push({
       flight,
@@ -549,8 +569,15 @@ async function parseTfmMessage(xml) {
       longitude:     lon,
       position_time: posTime,
       gufi,
-      tail_number:   null,
+      tail_number,
       aircraft_type: acType,
+      faa_flight_ref,
+      tfm_msg_type,
+      tfm_fd_trigger,
+      tfm_source_timestamp,
+      ncsm_flight_status,
+      aircraft_category: aircraftCategory,
+      airline_icao,
       raw_xml:       m[0].slice(0, 2000),
     });
   }

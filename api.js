@@ -111,6 +111,16 @@ app.get('/flight', auth, (req, res) => {
     } : null,
     _source:     'swim',
     _updated_at: event.updated_at,
+    _tfm: {
+      faa_flight_ref:     event.faa_flight_ref     || null,
+      msg_type:           event.tfm_msg_type       || null,
+      fd_trigger:         event.tfm_fd_trigger     || null,
+      source_timestamp:   event.tfm_source_timestamp || null,
+      ncsm_flight_status: event.ncsm_flight_status || null,
+      aircraft_category:  event.aircraft_category  || null,
+      airline_icao:       event.airline_icao      || null,
+      gufi:               event.gufi              || null,
+    },
   };
 
   res.json(normalized);

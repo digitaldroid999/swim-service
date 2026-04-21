@@ -48,6 +48,13 @@ db.exec(`
     gufi            TEXT,                 -- FAA globally unique flight identifier
     tail_number     TEXT,
     aircraft_type   TEXT,
+    faa_flight_ref  TEXT,                 -- flightRef on fltdMessage
+    tfm_msg_type    TEXT,                 -- e.g. FlightModify, flightCreate
+    tfm_fd_trigger  TEXT,                 -- fdTrigger attribute
+    tfm_source_timestamp TEXT,            -- sourceTimeStamp (FAA publish time, ISO)
+    ncsm_flight_status TEXT,                -- nxcm:flightStatus e.g. PLANNED
+    aircraft_category TEXT,                -- e.g. JET on qualifiedAircraftId
+    airline_icao   TEXT,                  -- airline attr (3-letter ICAO)
     raw_xml         TEXT,                 -- last raw TFMData message for debugging
     updated_at      TEXT NOT NULL,        -- ISO UTC timestamp of last update
     UNIQUE(flight, date, dep_airport)
@@ -71,6 +78,26 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_watches_flight ON flight_watches(flight, date);
 `);
 
+// ── Add TFM metadata columns on existing DBs (SQLite) ──────────────────────────
+(function migrateFlightEventsColumns() {
+  const cols = db.prepare('PRAGMA table_info(flight_events)').all();
+  const have = new Set(cols.map((c) => c.name));
+  const add = [
+    ['faa_flight_ref', 'TEXT'],
+    ['tfm_msg_type', 'TEXT'],
+    ['tfm_fd_trigger', 'TEXT'],
+    ['tfm_source_timestamp', 'TEXT'],
+    ['ncsm_flight_status', 'TEXT'],
+    ['aircraft_category', 'TEXT'],
+    ['airline_icao', 'TEXT'],
+  ];
+  for (const [name, typ] of add) {
+    if (!have.has(name)) {
+      db.exec(`ALTER TABLE flight_events ADD COLUMN ${name} ${typ}`);
+    }
+  }
+})();
+
 // ── flight_events helpers ─────────────────────────────────────────────────────
 
 const upsertEvent = db.prepare(`
@@ -81,7 +108,10 @@ const upsertEvent = db.prepare(`
      dep_gate, arr_gate, dep_terminal, arr_terminal,
      dep_delay_min, arr_delay_min,
      altitude, speed, latitude, longitude, position_time, gufi,
-     tail_number, aircraft_type, raw_xml, updated_at)
+     tail_number, aircraft_type,
+     faa_flight_ref, tfm_msg_type, tfm_fd_trigger, tfm_source_timestamp,
+     ncsm_flight_status, aircraft_category, airline_icao,
+     raw_xml, updated_at)
   VALUES
     (@flight, @date, @dep_airport, @arr_airport, @status,
      @scheduled_dep, @scheduled_arr,
@@ -89,7 +119,10 @@ const upsertEvent = db.prepare(`
      @dep_gate, @arr_gate, @dep_terminal, @arr_terminal,
      @dep_delay_min, @arr_delay_min,
      @altitude, @speed, @latitude, @longitude, @position_time, @gufi,
-     @tail_number, @aircraft_type, @raw_xml, @updated_at)
+     @tail_number, @aircraft_type,
+     @faa_flight_ref, @tfm_msg_type, @tfm_fd_trigger, @tfm_source_timestamp,
+     @ncsm_flight_status, @aircraft_category, @airline_icao,
+     @raw_xml, @updated_at)
   ON CONFLICT(flight, date, dep_airport) DO UPDATE SET
     arr_airport   = excluded.arr_airport,
     status        = excluded.status,
@@ -113,6 +146,13 @@ const upsertEvent = db.prepare(`
     gufi          = COALESCE(excluded.gufi,          gufi),
     tail_number   = COALESCE(excluded.tail_number,   tail_number),
     aircraft_type = COALESCE(excluded.aircraft_type, aircraft_type),
+    faa_flight_ref = COALESCE(excluded.faa_flight_ref, faa_flight_ref),
+    tfm_msg_type = COALESCE(excluded.tfm_msg_type, tfm_msg_type),
+    tfm_fd_trigger = COALESCE(excluded.tfm_fd_trigger, tfm_fd_trigger),
+    tfm_source_timestamp = COALESCE(excluded.tfm_source_timestamp, tfm_source_timestamp),
+    ncsm_flight_status = COALESCE(excluded.ncsm_flight_status, ncsm_flight_status),
+    aircraft_category = COALESCE(excluded.aircraft_category, aircraft_category),
+    airline_icao = COALESCE(excluded.airline_icao, airline_icao),
     raw_xml       = excluded.raw_xml,
     updated_at    = excluded.updated_at
 `);
@@ -144,6 +184,13 @@ function saveEvent(event) {
     gufi:          event.gufi          || null,
     tail_number:   event.tail_number   || null,
     aircraft_type: event.aircraft_type || null,
+    faa_flight_ref: event.faa_flight_ref || null,
+    tfm_msg_type:   event.tfm_msg_type   || null,
+    tfm_fd_trigger: event.tfm_fd_trigger || null,
+    tfm_source_timestamp: event.tfm_source_timestamp || null,
+    ncsm_flight_status: event.ncsm_flight_status || null,
+    aircraft_category: event.aircraft_category || null,
+    airline_icao:  event.airline_icao  || null,
     raw_xml:       event.raw_xml       || null,
     updated_at:    new Date().toISOString(),
   });
