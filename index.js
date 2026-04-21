@@ -2,6 +2,8 @@
 // SWIM: AMQP 1.0 (Solace) and/or Solace SMF — same routing as swim-node-consumer (URL scheme).
 // Parses TFMData / SFDPS XML, stores events, triggers push notifications.
 
+require('dotenv').config(); // before reading SWIM_* (run app from project root so `.env` is found)
+
 const cron = require('node-cron');
 const config = require('./config');
 const db = require('./db');
@@ -13,15 +15,23 @@ const { brokerKind } = require('./lib/broker-url');
 const { connectAmqpQueue } = require('./lib/amqp-queue');
 const { connectSmfQueue } = require('./lib/smf-queue');
 
-const logPreSave =
-  process.env.SWIM_LOG_PRE_SAVE === 'true' || process.env.SWIM_LOG_DB_ROWS === 'true';
+function envFlag(name) {
+  const v = process.env[name];
+  if (v === undefined || v === '') return false;
+  const s = String(v).trim().toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+}
+
+function isLogPreSaveEnabled() {
+  return envFlag('SWIM_LOG_PRE_SAVE') || envFlag('SWIM_LOG_DB_ROWS');
+}
 
 /**
  * Log one sample event (flight_events shape) and flight_watches for that flight/date.
  * Call once per handler invocation, not per event in a batch.
  */
 function logBeforeSaveEvent(source, event) {
-  if (!logPreSave) return;
+  if (!isLogPreSaveEnabled()) return;
   const ev = { ...event };
   if (ev.raw_xml != null && typeof ev.raw_xml === 'string' && ev.raw_xml.length > 800) {
     ev.raw_xml = `${ev.raw_xml.slice(0, 800)}… (${event.raw_xml.length} chars total)`;
@@ -37,6 +47,12 @@ function logBeforeSaveEvent(source, event) {
 }
 
 console.log('[swim] Crew Assist SWIM Service starting…');
+
+if (isLogPreSaveEnabled()) {
+  console.log(
+    '[swim] SWIM_LOG_PRE_SAVE is on — you will see one sample flight_events + flight_watches log per TFM/SFDPS message when messages arrive (not on a timer).'
+  );
+}
 
 initVapid();
 startApi();
