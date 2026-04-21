@@ -165,6 +165,9 @@ function utcDate(isoStr) {
 
 // ── Main parse function ───────────────────────────────────────────────────────
 function parseSfdpsMessage(xmlStr) {
+
+  console.log(`[SFDPS] parsing message : ${xmlStr}`);
+  
   // Log first few raw messages for format verification
   if (_rawLogCount < RAW_LOG_MAX) {
     _rawLogCount++;
