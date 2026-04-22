@@ -68,6 +68,8 @@ module.exports = {
   api: {
     port: parseInt(process.env.API_PORT || '3000', 10),
     secret: process.env.API_SECRET || 'change-this-secret',
+    /** Set API_LOG=1 to log each /flight and /watch request (and errors always go to stderr). */
+    log: /^(1|true|yes)$/i.test(String(process.env.API_LOG || '').trim()),
   },
 
   vapid: {

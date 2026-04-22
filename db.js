@@ -107,7 +107,7 @@ db.exec(`
   if (!cols.some((c) => c.name === 'raw_xml')) return;
   try {
     db.exec('ALTER TABLE flight_events DROP COLUMN raw_xml');
-    console.log('[db] dropped raw_xml column from flight_events');
+    // console.log('[db] dropped raw_xml column from flight_events');
   } catch (e) {
     const r = db
       .prepare("UPDATE flight_events SET raw_xml = NULL WHERE raw_xml IS NOT NULL")
@@ -226,17 +226,23 @@ function saveEvent(event) {
 }
 
 function getEvent(flight, date, depAirport) {
-  if (depAirport) {
-    return getEventByFdd.get(flight, date, depAirport) || null;
-  }
-  return getEventByFdNewest.get(flight, date) || null;
+  const row = depAirport
+    ? getEventByFdd.get(flight, date, depAirport) || null
+    : getEventByFdNewest.get(flight, date) || null;
+  console.log('[db] getEvent', {
+    flight,
+    date,
+    dep: depAirport || null,
+    found: Boolean(row),
+  });
+  return row;
 }
 
 // Clean up events older than 3 days
 function pruneOldEvents() {
   const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const result = db.prepare("DELETE FROM flight_events WHERE date < ?").run(cutoff);
-  if (result.changes > 0) console.log(`[db] pruned ${result.changes} old flight events`);
+  // if (result.changes > 0) console.log(`[db] pruned ${result.changes} old flight events`);
 }
 
 // ── flight_watches helpers ────────────────────────────────────────────────────

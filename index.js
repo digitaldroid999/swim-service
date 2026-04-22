@@ -67,20 +67,20 @@ function logBeforeSaveEvent(source, event) {
 
   // console.log(`[${source}] flight_events (before saveEvent)\n${JSON.stringify(ev, null, 2)}`);
   if (watches != null) {
-    console.log(
-      `[${source}] flight_watches (existing rows for ${event.flight} ${event.date}, before saveEvent)\n` +
-        JSON.stringify(watches, null, 2)
-    );
+    // console.log(
+    //   `[${source}] flight_watches (existing rows for ${event.flight} ${event.date}, before saveEvent)\n` +
+    //     JSON.stringify(watches, null, 2)
+    // );
   }
   appendPreSaveLogFile(block);
 }
 
-console.log('[swim] Crew Assist SWIM Service starting…');
+// console.log('[swim] Crew Assist SWIM Service starting…');
 
 if (isLogPreSaveEnabled()) {
-  console.log(
-    `[swim] SWIM_LOG_PRE_SAVE is on — logs append to ${preSaveLogFilePath()} (and console) when TFM/SFDPS messages arrive.`
-  );
+  // console.log(
+  //   `[swim] SWIM_LOG_PRE_SAVE is on — logs append to ${preSaveLogFilePath()} (and console) when TFM/SFDPS messages arrive.`
+  // );
 }
 
 initVapid();
@@ -89,7 +89,7 @@ startApi();
 cron.schedule('0 3 * * *', () => {
   db.pruneOldEvents();
   db.pruneOldWatches();
-  console.log('[swim] daily prune complete');
+  // console.log('[swim] daily prune complete');
 });
 
 const swim = config.swim;
@@ -124,7 +124,7 @@ if (!sfdps.username || !sfdps.password || !sfdps.queue) {
 
 async function handleTfmXml(xmlStr) {
   const events = await parser.parseTfmMessage(xmlStr);
-  console.log(`[swim] parsed ${events.length} events from TFM message`);
+  // console.log(`[swim] parsed ${events.length} events from TFM message`);
 
   if (events.length > 0) {
     logBeforeSaveEvent('swim', events[0]);
@@ -140,9 +140,9 @@ async function handleTfmXml(xmlStr) {
 }
 
 async function handleSfdpsXml(xmlStr) {
-  console.log(`[SFDPS] received message`);
+  // console.log(`[SFDPS] received message`);
   const events = sfdpsParser.parseSfdpsMessage(xmlStr);
-  console.log(`[SFDPS] parsed ${events.length} events from SFDPS message`);
+  // console.log(`[SFDPS] parsed ${events.length} events from SFDPS message`);
 
   if (events.length > 0) {
     logBeforeSaveEvent('sfdps', events[0]);
@@ -160,7 +160,7 @@ async function handleSfdpsXml(xmlStr) {
 function connectSwim() {
   const c = config.swim;
   const kind = brokerKind(c.url, true);
-  console.log(`[swim] broker transport kind: ${kind}${c.url ? ` (SWIM_URL=${c.url})` : ' (legacy AMQP: host/port)'}`);
+  // console.log(`[swim] broker transport kind: ${kind}${c.url ? ` (SWIM_URL=${c.url})` : ' (legacy AMQP: host/port)'}`);
 
   if (kind === 'smf') {
     connectSmfQueue({
@@ -213,7 +213,7 @@ function connectSwim() {
 function connectSfdps() {
   const c = config.sfdps;
   const kind = brokerKind(c.url, true);
-  console.log(`[sfdps] broker transport kind: ${kind}${c.url ? ` (SWIM_SFDPS_URL=${c.url})` : ' (legacy AMQP: host/port)'}`);
+  // console.log(`[sfdps] broker transport kind: ${kind}${c.url ? ` (SWIM_SFDPS_URL=${c.url})` : ' (legacy AMQP: host/port)'}`);
 
   if (kind === 'smf') {
     connectSmfQueue({
@@ -264,11 +264,11 @@ function connectSfdps() {
 }
 
 process.on('SIGTERM', () => {
-  console.log('[swim] SIGTERM received — shutting down');
+  // console.log('[swim] SIGTERM received — shutting down');
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('[swim] SIGINT received — shutting down');
+  // console.log('[swim] SIGINT received — shutting down');
   process.exit(0);
 });

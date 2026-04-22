@@ -20,7 +20,7 @@ function initVapid() {
     config.vapid.privateKey,
   );
   vapidReady = true;
-  console.log('[push] VAPID ready');
+  // console.log('[push] VAPID ready');
 }
 
 // Called by index.js whenever a flight event is saved and status changed.
@@ -49,11 +49,11 @@ async function notifyWatchers(event, previousStatus) {
 
       await webpush.sendNotification(sub, JSON.stringify(payload));
       db.updateWatchNotified(watch.id, event.status);
-      console.log(`[push] sent ${event.status} for ${event.flight} to ${watch.user_email}`);
+      // console.log(`[push] sent ${event.status} for ${event.flight} to ${watch.user_email}`);
     } catch (err) {
       if (err.statusCode === 410 || err.statusCode === 404) {
         // Subscription expired — nothing to do, Netlify side will clean up
-        console.log(`[push] expired subscription for ${watch.user_email}`);
+        // console.log(`[push] expired subscription for ${watch.user_email}`);
       } else {
         console.warn(`[push] send error for ${watch.user_email}:`, err.message);
       }

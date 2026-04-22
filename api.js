@@ -9,6 +9,15 @@ const config  = require('./config');
 const app = express();
 app.use(express.json());
 
+function apiLogDebug(...args) {
+  if (config.api.log) {
+    console.log('[api]', ...args);
+  }
+}
+function apiError(...args) {
+  console.error('[api]', ...args);
+}
+
 /** Max flights per POST /watch body (abuse / memory guard). */
 const MAX_WATCH_FLIGHTS = 100;
 
@@ -59,9 +68,12 @@ function isValidWatchEmail(email) {
 // ── GET /flight?flight=UA440&date=2026-04-15&dep=EWR ─────────────────────────
 // Returns cached SWIM data for a flight. Used by Netlify flight_status.js.
 app.get('/flight', auth, (req, res) => {
+  try {
   const flight = (req.query.flight || '').toUpperCase().replace(/\s/g, '');
   const date   = (req.query.date   || '').slice(0, 10);
   const dep    = (req.query.dep    || '').toUpperCase().replace(/\s/g, '');
+
+  apiLogDebug('GET /flight', { flight, date, dep: dep || null });
 
   if (!flight || !date) {
     return res.status(400).json({ error: 'flight and date required' });
@@ -124,6 +136,12 @@ app.get('/flight', auth, (req, res) => {
   };
 
   res.json(normalized);
+  } catch (err) {
+    apiError('GET /flight failed:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
 });
 
 // ── POST /watch ───────────────────────────────────────────────────────────────
@@ -131,7 +149,9 @@ app.get('/flight', auth, (req, res) => {
 // Called by Netlify save_schedule.js after saving a schedule.
 // Body: { userEmail, flights: [{ flight, date, dep, arr }] }
 app.post('/watch', auth, (req, res) => {
+  try {
   const { userEmail, flights } = req.body || {};
+  apiLogDebug('POST /watch', { userEmail, flightCount: Array.isArray(flights) ? flights.length : 0 });
   if (!userEmail || !Array.isArray(flights) || !flights.length) {
     return res.status(400).json({ error: 'userEmail and flights[] required' });
   }
@@ -172,6 +192,12 @@ app.post('/watch', auth, (req, res) => {
 
   const added = db.addWatchesBatch(toAdd);
   res.json({ ok: true, added });
+  } catch (err) {
+    apiError('POST /watch failed:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
 });
 
 // ── GET /health ───────────────────────────────────────────────────────────────
@@ -180,8 +206,14 @@ app.get('/health', (req, res) => {
 });
 
 function startApi() {
-  app.listen(config.api.port, () => {
-    console.log(`[api] listening on port ${config.api.port}`);
+  const host = '0.0.0.0';
+  const server = app.listen(config.api.port, host, () => {
+    if (config.api.log) {
+      console.log(`[api] listening on http://${host}:${config.api.port} (API_LOG=1)`);
+    }
+  });
+  server.on('error', (err) => {
+    apiError('HTTP server error:', err);
   });
 }
 

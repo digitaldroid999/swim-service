@@ -151,7 +151,7 @@ function connectQueueConsumer(opts) {
     });
 
     messageConsumer.on(solace.MessageConsumerEventName.UP, () => {
-      console.log(`[${logPrefix}] queue bound: ${queueName}`);
+      // console.log(`[${logPrefix}] queue bound: ${queueName}`);
     });
 
     messageConsumer.on(solace.MessageConsumerEventName.CONNECT_FAILED_ERROR, (err) => {

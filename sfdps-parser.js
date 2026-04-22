@@ -271,9 +271,9 @@ function parseSfdpsMessage(xmlStr) {
     const hasTime = /actualOffBlockTime|completeDateTime|estimatedOffBlockTime|dateTime="/i.test(
       xmlStr
     );
-    console.log(
-      `[sfdps] parse yielded 0 events — xmlLen=${xmlStr.length} aircraftId-ish=${hasId} time-ish=${hasTime}`
-    );
+    // console.log(
+    //   `[sfdps] parse yielded 0 events — xmlLen=${xmlStr.length} aircraftId-ish=${hasId} time-ish=${hasTime}`
+    // );
   }
 
   return results;
@@ -377,7 +377,7 @@ function parseFlight(xml) {
   // Must have at least one usable time (OOOI, estimate, or NAS fallback) to persist
   if (!gateOutFinal && !wheelsOffFinal && !wheelsOnFinal && !gateInFinal) {
     if (_rawLogCount <= RAW_LOG_MAX) {
-      console.log('[sfdps] no actual/estimated OOOI times in block, callsign:', icaoCallsign);
+      // console.log('[sfdps] no actual/estimated OOOI times in block, callsign:', icaoCallsign);
     }
     return null;
   }
