@@ -28,7 +28,6 @@ const baseEvent = {
   gufi:          null,
   tail_number:   'N12345',
   aircraft_type: 'B738',
-  raw_xml:       '<test/>',
 };
 
 describe('db.saveEvent / db.getEvent', () => {

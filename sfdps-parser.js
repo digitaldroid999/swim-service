@@ -423,7 +423,6 @@ function parseFlight(xml) {
     wheels_off: wheelsOffFinal || null,
     wheels_on: wheelsOnFinal || null,
     gate_in: gateInFinal || null,
-    raw_xml: xml.slice(0, 4000),
   };
 }
 

@@ -32,7 +32,6 @@ const testEvent = {
   gufi:          'GUFI-TEST-001',
   tail_number:   'N12345',
   aircraft_type: 'B738',
-  raw_xml:       '<test/>',
 };
 
 beforeAll(() => {

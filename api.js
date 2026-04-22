@@ -143,7 +143,7 @@ app.post('/watch', auth, (req, res) => {
   }
 
   const email = userEmail.trim();
-  let added = 0;
+  const toAdd = [];
   for (const f of flights) {
     if (!f || typeof f !== 'object') {
       return res.status(400).json({ error: 'each flights[] item must be an object' });
@@ -167,10 +167,10 @@ app.post('/watch', auth, (req, res) => {
 
     const dep = f.dep != null && f.dep !== '' ? normalizeIata(f.dep) : null;
     const arr = f.arr != null && f.arr !== '' ? normalizeIata(f.arr) : null;
-    db.addWatch(email, flight, date, dep, arr);
-    added++;
+    toAdd.push({ userEmail: email, flight, date, dep, arr });
   }
 
+  const added = db.addWatchesBatch(toAdd);
   res.json({ ok: true, added });
 });
 

@@ -17,6 +17,8 @@ const db = new Database(config.db.path);
 // Performance pragmas
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
+// Larger cache helps read-heavy API with big DBs (value is -kilobytes; 64 ≈ 64MB)
+db.pragma('cache_size = -64000');
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -55,13 +57,14 @@ db.exec(`
     ncsm_flight_status TEXT,                -- nxcm:flightStatus e.g. PLANNED
     aircraft_category TEXT,                -- e.g. JET on qualifiedAircraftId
     airline_icao   TEXT,                  -- airline attr (3-letter ICAO)
-    raw_xml         TEXT,                 -- last raw TFMData message for debugging
     updated_at      TEXT NOT NULL,        -- ISO UTC timestamp of last update
     UNIQUE(flight, date, dep_airport)
   );
 
   CREATE INDEX IF NOT EXISTS idx_flight_date ON flight_events(flight, date);
   CREATE INDEX IF NOT EXISTS idx_updated     ON flight_events(updated_at);
+  CREATE INDEX IF NOT EXISTS idx_flight_date_updated_at
+    ON flight_events(flight, date, updated_at);
 
   CREATE TABLE IF NOT EXISTS flight_watches (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,6 +101,34 @@ db.exec(`
   }
 })();
 
+// Remove legacy `raw_xml` (SQLite 3.35+). If that fails, clear the column so it stops growing; run VACUUM offline to reclaim space.
+(function removeLegacyRawXmlColumn() {
+  const cols = db.prepare('PRAGMA table_info(flight_events)').all();
+  if (!cols.some((c) => c.name === 'raw_xml')) return;
+  try {
+    db.exec('ALTER TABLE flight_events DROP COLUMN raw_xml');
+    console.log('[db] dropped raw_xml column from flight_events');
+  } catch (e) {
+    const r = db
+      .prepare("UPDATE flight_events SET raw_xml = NULL WHERE raw_xml IS NOT NULL")
+      .run();
+    if (r.changes > 0) {
+      console.warn(
+        '[db] cleared raw_xml on',
+        r.changes,
+        'row(s) (drop column not supported: upgrade SQLite or re-create DB to reclaim space)'
+      );
+    }
+  }
+})();
+
+const getEventByFdd = db.prepare(
+  'SELECT * FROM flight_events WHERE flight = ? AND date = ? AND dep_airport = ?'
+);
+const getEventByFdNewest = db.prepare(
+  'SELECT * FROM flight_events WHERE flight = ? AND date = ? ORDER BY updated_at DESC LIMIT 1'
+);
+
 // ── flight_events helpers ─────────────────────────────────────────────────────
 
 const upsertEvent = db.prepare(`
@@ -111,7 +142,7 @@ const upsertEvent = db.prepare(`
      tail_number, aircraft_type,
      faa_flight_ref, tfm_msg_type, tfm_fd_trigger, tfm_source_timestamp,
      ncsm_flight_status, aircraft_category, airline_icao,
-     raw_xml, updated_at)
+     updated_at)
   VALUES
     (@flight, @date, @dep_airport, @arr_airport, @status,
      @scheduled_dep, @scheduled_arr,
@@ -122,7 +153,7 @@ const upsertEvent = db.prepare(`
      @tail_number, @aircraft_type,
      @faa_flight_ref, @tfm_msg_type, @tfm_fd_trigger, @tfm_source_timestamp,
      @ncsm_flight_status, @aircraft_category, @airline_icao,
-     @raw_xml, @updated_at)
+     @updated_at)
   ON CONFLICT(flight, date, dep_airport) DO UPDATE SET
     arr_airport   = excluded.arr_airport,
     status        = excluded.status,
@@ -153,7 +184,6 @@ const upsertEvent = db.prepare(`
     ncsm_flight_status = COALESCE(excluded.ncsm_flight_status, ncsm_flight_status),
     aircraft_category = COALESCE(excluded.aircraft_category, aircraft_category),
     airline_icao = COALESCE(excluded.airline_icao, airline_icao),
-    raw_xml       = excluded.raw_xml,
     updated_at    = excluded.updated_at
 `);
 
@@ -191,21 +221,15 @@ function saveEvent(event) {
     ncsm_flight_status: event.ncsm_flight_status || null,
     aircraft_category: event.aircraft_category || null,
     airline_icao:  event.airline_icao  || null,
-    raw_xml:       event.raw_xml       || null,
     updated_at:    new Date().toISOString(),
   });
 }
 
 function getEvent(flight, date, depAirport) {
   if (depAirport) {
-    return db.prepare(
-      'SELECT * FROM flight_events WHERE flight=? AND date=? AND dep_airport=?'
-    ).get(flight, date, depAirport) || null;
+    return getEventByFdd.get(flight, date, depAirport) || null;
   }
-  // No dep airport — return most recently updated matching flight
-  return db.prepare(
-    'SELECT * FROM flight_events WHERE flight=? AND date=? ORDER BY updated_at DESC LIMIT 1'
-  ).get(flight, date) || null;
+  return getEventByFdNewest.get(flight, date) || null;
 }
 
 // Clean up events older than 3 days
@@ -217,12 +241,37 @@ function pruneOldEvents() {
 
 // ── flight_watches helpers ────────────────────────────────────────────────────
 
+const insertWatchStmt = db.prepare(`
+  INSERT OR IGNORE INTO flight_watches
+    (user_email, flight, date, dep_airport, arr_airport, created_at)
+  VALUES (?, ?, ?, ?, ?, ?)
+`);
+
 function addWatch(userEmail, flight, date, depAirport, arrAirport) {
-  db.prepare(`
-    INSERT OR IGNORE INTO flight_watches
-      (user_email, flight, date, dep_airport, arr_airport, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(userEmail, flight, date, depAirport || null, arrAirport || null, new Date().toISOString());
+  insertWatchStmt.run(
+    userEmail,
+    flight,
+    date,
+    depAirport || null,
+    arrAirport || null,
+    new Date().toISOString()
+  );
+}
+
+/**
+ * All inserts in one transaction (faster for POST /watch with many flights).
+ * @param {Array<{ userEmail: string, flight: string, date: string, dep: string|null, arr: string|null }>} rows
+ */
+function addWatchesBatch(rows) {
+  if (!rows || !rows.length) return 0;
+  const now = new Date().toISOString();
+  const run = db.transaction((list) => {
+    for (const w of list) {
+      insertWatchStmt.run(w.userEmail, w.flight, w.date, w.dep, w.arr, now);
+    }
+  });
+  run(rows);
+  return rows.length;
 }
 
 function getWatchesForFlight(flight, date) {
@@ -245,6 +294,7 @@ module.exports = {
   getEvent,
   pruneOldEvents,
   addWatch,
+  addWatchesBatch,
   getWatchesForFlight,
   updateWatchNotified,
   pruneOldWatches,

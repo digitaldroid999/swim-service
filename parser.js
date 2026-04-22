@@ -578,7 +578,6 @@ async function parseTfmMessage(xml) {
       ncsm_flight_status,
       aircraft_category: aircraftCategory,
       airline_icao,
-      raw_xml:       m[0].slice(0, 2000),
     });
   }
 

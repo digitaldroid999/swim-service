@@ -53,9 +53,6 @@ function appendPreSaveLogFile(text) {
 function logBeforeSaveEvent(source, event) {
   if (!isLogPreSaveEnabled()) return;
   const ev = { ...event };
-  if (ev.raw_xml != null && typeof ev.raw_xml === 'string' && ev.raw_xml.length > 800) {
-    ev.raw_xml = `${ev.raw_xml.slice(0, 800)}… (${event.raw_xml.length} chars total)`;
-  }
   const watches =
     event.flight && event.date ? db.getWatchesForFlight(event.flight, event.date) : null;
 
