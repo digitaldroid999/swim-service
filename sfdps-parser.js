@@ -229,10 +229,11 @@ const RE_FLIGHT_OPEN_TAG = /<(?:[^>\s/:.]*:)?flight(?:\s|\/>|>)/gi;
 // ── Main parse function ───────────────────────────────────────────────────────
 function parseSfdpsMessage(xmlStr) {
   // Log first few raw messages for format verification
-  if (_rawLogCount < RAW_LOG_MAX) {
-    _rawLogCount++;
-    console.log(`[sfdps] RAW MESSAGE #${_rawLogCount}:\n`, xmlStr.slice(0, 2000));
-  }
+  
+  // if (_rawLogCount < RAW_LOG_MAX) {
+  //   _rawLogCount++;
+  //   console.log(`[sfdps] RAW MESSAGE #${_rawLogCount}:\n`, xmlStr.slice(0, 2000));
+  // }
 
   const results = [];
 
@@ -408,9 +409,9 @@ function parseFlight(xml) {
   const dateStr = utcDate(dateBasis);
   if (!dateStr) return null;
 
-  console.log(
-    `[sfdps] ${flight} ${depAirport || '???'}→${arrAirport || '???'} OUT:${gateOutFinal || '-'} OFF:${wheelsOffFinal || '-'} ON:${wheelsOnFinal || '-'} IN:${gateInFinal || '-'}`
-  );
+  // console.log(
+  //   `[sfdps] ${flight} ${depAirport || '???'}→${arrAirport || '???'} OUT:${gateOutFinal || '-'} OFF:${wheelsOffFinal || '-'} ON:${wheelsOnFinal || '-'} IN:${gateInFinal || '-'}`
+  // );
 
   return {
     flight,
