@@ -17,8 +17,12 @@ const db = new Database(config.db.path);
 // Performance pragmas
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
+// Wait on lock instead of SQLITE_BUSY (API + TFM/SFDPS writers)
+db.pragma('busy_timeout = 10000');
 // Larger cache helps read-heavy API with big DBs (value is -kilobytes; 64 ≈ 64MB)
 db.pragma('cache_size = -64000');
+// Map DB file for fewer read syscalls on large files (bytes; 256MB)
+db.pragma('mmap_size = 268435456');
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -229,13 +233,23 @@ function getEvent(flight, date, depAirport) {
   const row = depAirport
     ? getEventByFdd.get(flight, date, depAirport) || null
     : getEventByFdNewest.get(flight, date) || null;
-  console.log('[db] getEvent', {
-    flight,
-    date,
-    dep: depAirport || null,
-    found: Boolean(row),
-  });
+  if (config.db.logGetEvent) {
+    console.log('[db] getEvent', {
+      flight,
+      date,
+      dep: depAirport || null,
+      found: Boolean(row),
+    });
+  }
   return row;
+}
+
+/**
+ * One transaction per SWIM message batch: one WAL commit instead of N (major throughput win under load).
+ * @param {() => void} fn Only synchronous work; do not await inside.
+ */
+function runInTransaction(fn) {
+  db.transaction(fn)();
 }
 
 // Clean up events older than 3 days
@@ -298,6 +312,7 @@ function pruneOldWatches() {
 module.exports = {
   saveEvent,
   getEvent,
+  runInTransaction,
   pruneOldEvents,
   addWatch,
   addWatchesBatch,

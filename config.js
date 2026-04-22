@@ -80,6 +80,8 @@ module.exports = {
 
   db: {
     path: process.env.DB_PATH || './data/swim.db',
+    /** High-volume SWIM: set off in production to avoid console I/O on every getEvent. */
+    logGetEvent: /^(1|true|yes)$/i.test(String(process.env.DB_LOG_GET_EVENT || '').trim()),
   },
 
   netlify: {

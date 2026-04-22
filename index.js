@@ -129,13 +129,19 @@ async function handleTfmXml(xmlStr) {
   if (events.length > 0) {
     logBeforeSaveEvent('swim', events[0]);
   }
-  for (const event of events) {
-    const prev = db.getEvent(event.flight, event.date, event.dep_airport);
-    const prevStatus = prev ? prev.status : null;
-    db.saveEvent(event);
-    if (event.status !== prevStatus) {
-      notifyWatchers(event, prevStatus).catch((err) => console.warn('[swim] notify error:', err.message));
+  const toNotify = [];
+  db.runInTransaction(() => {
+    for (const event of events) {
+      const prev = db.getEvent(event.flight, event.date, event.dep_airport);
+      const prevStatus = prev ? prev.status : null;
+      db.saveEvent(event);
+      if (event.status !== prevStatus) {
+        toNotify.push({ event, prevStatus });
+      }
     }
+  });
+  for (const { event, prevStatus } of toNotify) {
+    notifyWatchers(event, prevStatus).catch((err) => console.warn('[swim] notify error:', err.message));
   }
 }
 
@@ -147,13 +153,19 @@ async function handleSfdpsXml(xmlStr) {
   if (events.length > 0) {
     logBeforeSaveEvent('sfdps', events[0]);
   }
-  for (const event of events) {
-    const prev = db.getEvent(event.flight, event.date, event.dep_airport);
-    const prevStatus = prev ? prev.status : null;
-    db.saveEvent(event);
-    if (event.status && event.status !== prevStatus) {
-      notifyWatchers(event, prevStatus).catch((err) => console.warn('[sfdps] notify error:', err.message));
+  const toNotify = [];
+  db.runInTransaction(() => {
+    for (const event of events) {
+      const prev = db.getEvent(event.flight, event.date, event.dep_airport);
+      const prevStatus = prev ? prev.status : null;
+      db.saveEvent(event);
+      if (event.status && event.status !== prevStatus) {
+        toNotify.push({ event, prevStatus });
+      }
     }
+  });
+  for (const { event, prevStatus } of toNotify) {
+    notifyWatchers(event, prevStatus).catch((err) => console.warn('[sfdps] notify error:', err.message));
   }
 }
 
