@@ -1,5 +1,5 @@
 // Crew Assist SWIM Service — Main Entry Point
-// SWIM: AMQP 1.0 (Solace) and/or Solace SMF — same routing as swim-node-consumer (URL scheme).
+// SWIM: Solace SMF only here (tcps/tcp/wss/ws). AMQP consumer paths are commented out below.
 // Parses TFMData / SFDPS XML, stores events, triggers push notifications.
 
 require('dotenv').config(); // before reading SWIM_* (run app from project root so `.env` is found)
@@ -15,7 +15,7 @@ const sfdpsParser = require('./sfdps-parser');
 const { initVapid, notifyWatchers } = require('./notifications');
 const { startApi } = require('./api');
 const { brokerKind } = require('./lib/broker-url');
-const { connectAmqpQueue } = require('./lib/amqp-queue');
+// const { connectAmqpQueue } = require('./lib/amqp-queue'); // disabled — use SMF to FAA SWIM
 const { connectSmfQueue } = require('./lib/smf-queue');
 
 function envFlag(name) {
@@ -98,10 +98,16 @@ if (!swim.username || !swim.password || !swim.queue) {
   console.warn('[swim] Set SWIM_USERNAME, SWIM_PASSWORD, SWIM_QUEUE in .env to enable live data');
 } else {
   const kind = brokerKind(swim.url, true);
-  if (kind === 'unknown' && swim.url) {
-    console.error('[swim] unsupported SWIM_URL scheme — use amqp(s):// or tcp(s):// / ws(s)://');
-  } else if (kind === 'smf' && !swim.vpn) {
+  if (kind === 'smf' && !swim.vpn) {
     console.error('[swim] SMF requires SWIM_VPN (message VPN), matching Solace / swim-node-consumer');
+  } else if (kind !== 'smf') {
+    if (kind === 'unknown' && swim.url) {
+      console.error('[swim] unsupported SWIM_URL scheme — use tcps://, tcp://, wss://, or ws:// for SMF');
+    } else {
+      console.error(
+        '[swim] SMF only: set SWIM_URL to your FAA Solace broker (e.g. tcps://host:port). AMQP / legacy host:port is disabled.'
+      );
+    }
   } else {
     connectSwim();
   }
@@ -113,17 +119,22 @@ if (!sfdps.username || !sfdps.password || !sfdps.queue) {
   console.warn('[sfdps] Set SWIM_SFDPS_* vars in .env to enable actual gate/runway times');
 } else {
   const sKind = brokerKind(sfdps.url, true);
-  if (sKind === 'unknown' && sfdps.url) {
-    console.error('[sfdps] unsupported SWIM_SFDPS_URL scheme');
-  } else if (sKind === 'smf' && !sfdps.vpn) {
+  if (sKind === 'smf' && !sfdps.vpn) {
     console.error('[sfdps] SMF requires SWIM_SFDPS_VPN');
+  } else if (sKind !== 'smf') {
+    if (sKind === 'unknown' && sfdps.url) {
+      console.error('[sfdps] unsupported SWIM_SFDPS_URL scheme — use tcps://, tcp://, wss://, or ws:// for SMF');
+    } else {
+      console.error(
+        '[sfdps] SMF only: set SWIM_SFDPS_URL to your FAA Solace broker (e.g. tcps://host:port). AMQP / legacy host:port is disabled.'
+      );
+    }
   } else {
     connectSfdps();
   }
 }
 
 async function handleTfmXml(xmlStr) {
-  console.log(`[TFM] received message`);
   const events = await parser.parseTfmMessage(xmlStr);
   console.log(`[TFM] parsed ${events.length} events from TFM message`);
 
@@ -147,7 +158,6 @@ async function handleTfmXml(xmlStr) {
 }
 
 async function handleSfdpsXml(xmlStr) {
-  console.log(`[SFDPS] received message`);
   const events = sfdpsParser.parseSfdpsMessage(xmlStr);
   console.log(`[SFDPS] parsed ${events.length} events from SFDPS message`);
 
@@ -172,26 +182,24 @@ async function handleSfdpsXml(xmlStr) {
 
 function connectSwim() {
   const c = config.swim;
+  // Entry only when brokerKind(swim.url) === 'smf' (see startup checks).
+  connectSmfQueue({
+    providerUrl: c.url,
+    vpn: c.vpn,
+    username: c.username,
+    password: c.password,
+    queue: c.queue,
+    clientName: c.clientName,
+    reconnectRetries: c.reconnectRetries,
+    sslValidateCertificate: c.sslValidateCertificate,
+    sslTrustStores: c.sslTrustStores,
+    logPrefix: '[swim]',
+    onMessage: handleTfmXml,
+  });
+
+  /*
+  // ── AMQP (disabled; use SMF + SWIM_URL=tcps://… ) ─────────────────────────────
   const kind = brokerKind(c.url, true);
-  // console.log(`[swim] broker transport kind: ${kind}${c.url ? ` (SWIM_URL=${c.url})` : ' (legacy AMQP: host/port)'}`);
-
-  if (kind === 'smf') {
-    connectSmfQueue({
-      providerUrl: c.url,
-      vpn: c.vpn,
-      username: c.username,
-      password: c.password,
-      queue: c.queue,
-      clientName: c.clientName,
-      reconnectRetries: c.reconnectRetries,
-      sslValidateCertificate: c.sslValidateCertificate,
-      sslTrustStores: c.sslTrustStores,
-      logPrefix: '[swim]',
-      onMessage: handleTfmXml,
-    });
-    return;
-  }
-
   if (kind === 'amqp-url') {
     connectAmqpQueue({
       mode: 'url',
@@ -208,7 +216,6 @@ function connectSwim() {
     });
     return;
   }
-
   connectAmqpQueue({
     mode: 'legacy',
     host: c.host,
@@ -221,30 +228,28 @@ function connectSwim() {
     logPrefix: '[swim]',
     onMessage: handleTfmXml,
   });
+  */
 }
 
 function connectSfdps() {
   const c = config.sfdps;
+  connectSmfQueue({
+    providerUrl: c.url,
+    vpn: c.vpn,
+    username: c.username,
+    password: c.password,
+    queue: c.queue,
+    clientName: c.clientName,
+    reconnectRetries: c.reconnectRetries,
+    sslValidateCertificate: c.sslValidateCertificate,
+    sslTrustStores: c.sslTrustStores,
+    logPrefix: '[sfdps]',
+    onMessage: handleSfdpsXml,
+  });
+
+  /*
+  // ── AMQP (disabled; use SMF + SWIM_SFDPS_URL=tcps://… ) ───────────────────────
   const kind = brokerKind(c.url, true);
-  // console.log(`[sfdps] broker transport kind: ${kind}${c.url ? ` (SWIM_SFDPS_URL=${c.url})` : ' (legacy AMQP: host/port)'}`);
-
-  if (kind === 'smf') {
-    connectSmfQueue({
-      providerUrl: c.url,
-      vpn: c.vpn,
-      username: c.username,
-      password: c.password,
-      queue: c.queue,
-      clientName: c.clientName,
-      reconnectRetries: c.reconnectRetries,
-      sslValidateCertificate: c.sslValidateCertificate,
-      sslTrustStores: c.sslTrustStores,
-      logPrefix: '[sfdps]',
-      onMessage: handleSfdpsXml,
-    });
-    return;
-  }
-
   if (kind === 'amqp-url') {
     connectAmqpQueue({
       mode: 'url',
@@ -261,7 +266,6 @@ function connectSfdps() {
     });
     return;
   }
-
   connectAmqpQueue({
     mode: 'legacy',
     host: c.host,
@@ -274,6 +278,7 @@ function connectSfdps() {
     logPrefix: '[sfdps]',
     onMessage: handleSfdpsXml,
   });
+  */
 }
 
 process.on('SIGTERM', () => {
